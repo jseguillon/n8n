@@ -31,7 +31,10 @@ export function isSubstrateStatus(error: unknown, code: number): boolean {
 }
 
 export class SubstrateControl {
-	constructor(private readonly connection: SubstrateConnection) {}
+	constructor(
+		private readonly connection: SubstrateConnection,
+		private readonly timeoutMs: number,
+	) {}
 
 	async call(
 		method: 'CreateActor' | 'GetActor' | 'ResumeActor' | 'SuspendActor' | 'DeleteActor',
@@ -64,7 +67,7 @@ export class SubstrateControl {
 							: undefined,
 					request,
 					metadata,
-					{ deadline: Date.now() + 120_000 },
+					{ deadline: Date.now() + this.timeoutMs },
 					(error, value) => (error ? reject(error) : resolve(value)),
 				);
 			});

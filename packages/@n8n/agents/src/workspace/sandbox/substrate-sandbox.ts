@@ -70,8 +70,8 @@ export class SubstrateSandbox extends BaseSandbox {
 		const router = new URL(options.routerUrl);
 		if (!['http:', 'https:'].includes(router.protocol) || router.username || router.password)
 			throw new Error('Invalid Substrate router URL');
-		this.control = new SubstrateControl(options);
 		this.timeout = options.timeout ?? 300_000;
+		this.control = new SubstrateControl(options, this.timeout);
 	}
 
 	async start(): Promise<void> {
