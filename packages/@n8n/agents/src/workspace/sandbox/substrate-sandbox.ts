@@ -31,6 +31,8 @@ const fileStat = z
 const fileEntry = z
 	.object({ name: z.string(), size: z.number(), is_dir: z.boolean() })
 	.transform(({ is_dir, ...entry }) => ({ ...entry, isDir: is_dir }));
+const MAX_EXECUTION_EVENT_BYTES = 1024 * 1024;
+const MAX_EXECUTION_OUTPUT_BYTES = 10 * 1024 * 1024;
 const eventSchema = z.discriminatedUnion('type', [
 	z.object({ type: z.literal('started'), exec_id: z.string() }),
 	z.object({ type: z.literal('stdout'), data: z.string() }),
@@ -134,6 +136,7 @@ export class SubstrateSandbox extends BaseSandbox {
 		let execId: string | undefined;
 		let stdout = '';
 		let stderr = '';
+		let outputBytes = 0;
 		let result: CommandResult | undefined;
 		try {
 			const response = await this.request('/executions', {
@@ -158,10 +161,16 @@ export class SubstrateSandbox extends BaseSandbox {
 						execId = event.exec_id;
 						break;
 					case 'stdout':
+						outputBytes += Buffer.byteLength(event.data);
+						if (outputBytes > MAX_EXECUTION_OUTPUT_BYTES)
+							throw new Error('Substrate execution output exceeded the 10 MiB limit');
 						stdout += event.data;
 						options?.onStdout?.(event.data);
 						break;
 					case 'stderr':
+						outputBytes += Buffer.byteLength(event.data);
+						if (outputBytes > MAX_EXECUTION_OUTPUT_BYTES)
+							throw new Error('Substrate execution output exceeded the 10 MiB limit');
 						stderr += event.data;
 						options?.onStderr?.(event.data);
 						break;
@@ -189,9 +198,14 @@ export class SubstrateSandbox extends BaseSandbox {
 					pending += chunk.value;
 					let newline: number;
 					while ((newline = pending.indexOf('\n')) >= 0) {
-						consume(pending.slice(0, newline));
+						const line = pending.slice(0, newline);
+						if (Buffer.byteLength(line) > MAX_EXECUTION_EVENT_BYTES)
+							throw new Error('Substrate execution event exceeded the 1 MiB limit');
+						consume(line);
 						pending = pending.slice(newline + 1);
 					}
+					if (Buffer.byteLength(pending) > MAX_EXECUTION_EVENT_BYTES)
+						throw new Error('Substrate execution event exceeded the 1 MiB limit');
 				}
 				consume(pending);
 			} finally {

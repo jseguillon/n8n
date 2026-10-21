@@ -101,4 +101,20 @@ describe('Substrate sandbox daemon protocol', () => {
 			'without an exit event',
 		);
 	});
+
+	it('rejects oversized execution events before parsing them', async () => {
+		vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
+		const fetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response('ok'))
+			.mockResolvedValueOnce(
+				new Response(`{"type":"stdout","data":"${'x'.repeat(1024 * 1024)}"}\n`),
+			);
+		vi.stubGlobal('fetch', fetch);
+		const sandbox = new SubstrateSandbox(connection);
+
+		await expect(sandbox.executeCommand('printf', ['too-large'])).rejects.toThrow(
+			'event exceeded the 1 MiB limit',
+		);
+	});
 });
