@@ -245,6 +245,7 @@ describe('InstanceAiVerificationService', () => {
 				filesystem: {
 					writeFile: vi.fn().mockResolvedValue(undefined),
 					readFile: vi.fn().mockResolvedValue(Buffer.from('ok')),
+					deleteFile: vi.fn().mockResolvedValue(undefined),
 				},
 			};
 			createSandboxMock.mockResolvedValue({} as never);
@@ -261,6 +262,12 @@ describe('InstanceAiVerificationService', () => {
 			);
 			expect(workspace.filesystem.readFile).toHaveBeenCalledWith(
 				'/home/user/workspace/.n8n-substrate-verification',
+			);
+			expect(workspace.filesystem.deleteFile).toHaveBeenCalledWith(
+				'/home/user/workspace/.n8n-substrate-verification',
+			);
+			expect(createSandboxMock).toHaveBeenCalledWith(
+				expect.objectContaining({ provider: 'substrate', ephemeral: true }),
 			);
 		});
 

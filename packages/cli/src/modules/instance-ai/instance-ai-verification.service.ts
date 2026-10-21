@@ -188,16 +188,20 @@ export class InstanceAiVerificationService {
 				const filesystem = activeWorkspace.filesystem;
 				if (!filesystem) throw new Error('Substrate sandbox filesystem did not start');
 				const markerPath = '/home/user/workspace/.n8n-substrate-verification';
-				await raceWithAbort(
-					async () => await filesystem.writeFile(markerPath, 'ok', { recursive: true }),
-					abortSignal,
-				);
-				const marker = await raceWithAbort(
-					async () => await filesystem.readFile(markerPath),
-					abortSignal,
-				);
-				if (Buffer.from(marker).toString() !== 'ok') {
-					throw new Error('Substrate sandbox filesystem returned unexpected content');
+				try {
+					await raceWithAbort(
+						async () => await filesystem.writeFile(markerPath, 'ok', { recursive: true }),
+						abortSignal,
+					);
+					const marker = await raceWithAbort(
+						async () => await filesystem.readFile(markerPath),
+						abortSignal,
+					);
+					if (Buffer.from(marker).toString() !== 'ok') {
+						throw new Error('Substrate sandbox filesystem returned unexpected content');
+					}
+				} finally {
+					await raceWithAbort(async () => await filesystem.deleteFile(markerPath), abortSignal);
 				}
 			}
 			return { ok: true, startupMs };
@@ -306,7 +310,7 @@ export class InstanceAiVerificationService {
 		}
 
 		if (provider === 'substrate') {
-			return substrateSandboxConfig(instanceAi);
+			return { ...substrateSandboxConfig(instanceAi), ephemeral: true };
 		}
 
 		const saved = connection ? undefined : await this.settingsService.resolveN8nSandboxConfig();
