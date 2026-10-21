@@ -184,6 +184,22 @@ export class InstanceAiVerificationService {
 				abortSignal,
 			);
 			if (!result || result.exitCode !== 0) throw new Error('Sandbox command failed');
+			if (provider === 'substrate') {
+				const filesystem = activeWorkspace.filesystem;
+				if (!filesystem) throw new Error('Substrate sandbox filesystem did not start');
+				const markerPath = '/home/user/workspace/.n8n-substrate-verification';
+				await raceWithAbort(
+					async () => await filesystem.writeFile(markerPath, 'ok', { recursive: true }),
+					abortSignal,
+				);
+				const marker = await raceWithAbort(
+					async () => await filesystem.readFile(markerPath),
+					abortSignal,
+				);
+				if (Buffer.from(marker).toString() !== 'ok') {
+					throw new Error('Substrate sandbox filesystem returned unexpected content');
+				}
+			}
 			return { ok: true, startupMs };
 		} catch (error) {
 			const classifiedFailure = classifyFailure(error);

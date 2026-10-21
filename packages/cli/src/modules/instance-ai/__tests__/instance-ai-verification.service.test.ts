@@ -228,6 +228,42 @@ describe('InstanceAiVerificationService', () => {
 			expect(workspace.destroy).toHaveBeenCalled();
 		});
 
+		it('verifies the Substrate filesystem daemon', async () => {
+			Object.assign(globalConfig.instanceAi, {
+				substrateEndpoint: 'https://substrate.example.test',
+				substrateRouterUrl: 'https://router.example.test',
+				substrateAtespace: 'test-space',
+				substrateTemplate: 'test-template',
+				substrateTokenFile: '/run/secrets/substrate-token',
+				substrateCaFile: '/run/secrets/substrate-ca',
+				substrateServerName: 'substrate.example.test',
+			});
+			const workspace = {
+				init: vi.fn().mockResolvedValue(undefined),
+				destroy: vi.fn().mockResolvedValue(undefined),
+				sandbox: { executeCommand: vi.fn().mockResolvedValue({ exitCode: 0 }) },
+				filesystem: {
+					writeFile: vi.fn().mockResolvedValue(undefined),
+					readFile: vi.fn().mockResolvedValue(Buffer.from('ok')),
+				},
+			};
+			createSandboxMock.mockResolvedValue({} as never);
+			createWorkspaceMock.mockReturnValue(workspace as never);
+
+			await expect(service.verifySandbox(user, { provider: 'substrate' })).resolves.toMatchObject({
+				ok: true,
+			});
+
+			expect(workspace.filesystem.writeFile).toHaveBeenCalledWith(
+				'/home/user/workspace/.n8n-substrate-verification',
+				'ok',
+				{ recursive: true },
+			);
+			expect(workspace.filesystem.readFile).toHaveBeenCalledWith(
+				'/home/user/workspace/.n8n-substrate-verification',
+			);
+		});
+
 		it('returns a timeout and starts cleanup when sandbox verification exceeds the deadline', async () => {
 			const timeoutError = Object.assign(new Error('Sandbox verification timed out'), {
 				name: 'TimeoutError',
