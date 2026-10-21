@@ -223,32 +223,53 @@ export class SubstrateSandbox extends BaseSandbox {
 		}
 	}
 
-	async readFile(_id: string, path: string): Promise<Buffer> {
-		return Buffer.from(await (await this.request('/files/content', {}, { path })).arrayBuffer());
+	async readFile(_id: string, path: string, abortSignal?: AbortSignal): Promise<Buffer> {
+		return Buffer.from(
+			await (await this.request('/files/content', { signal: abortSignal }, { path })).arrayBuffer(),
+		);
 	}
 	async writeFile(
 		_id: string,
 		path: string,
 		content: FileContent,
 		overwrite = true,
+		abortSignal?: AbortSignal,
 	): Promise<void> {
 		await this.request(
 			'/files',
-			{ method: 'PUT', body: typeof content === 'string' ? content : new Uint8Array(content) },
+			{
+				method: 'PUT',
+				body: typeof content === 'string' ? content : new Uint8Array(content),
+				signal: abortSignal,
+			},
 			{ path, overwrite: String(overwrite) },
 		);
 	}
-	async appendFile(_id: string, path: string, content: FileContent): Promise<void> {
+	async appendFile(
+		_id: string,
+		path: string,
+		content: FileContent,
+		abortSignal?: AbortSignal,
+	): Promise<void> {
 		await this.request(
 			'/files',
-			{ method: 'POST', body: typeof content === 'string' ? content : new Uint8Array(content) },
+			{
+				method: 'POST',
+				body: typeof content === 'string' ? content : new Uint8Array(content),
+				signal: abortSignal,
+			},
 			{ path },
 		);
 	}
-	async deleteFile(_id: string, path: string, options?: DeleteFileOptions): Promise<void> {
+	async deleteFile(
+		_id: string,
+		path: string,
+		options?: DeleteFileOptions,
+		abortSignal?: AbortSignal,
+	): Promise<void> {
 		await this.request(
 			'/files',
-			{ method: 'DELETE' },
+			{ method: 'DELETE', signal: abortSignal },
 			{
 				path,
 				recursive: String(options?.recursive ?? false),
@@ -256,29 +277,46 @@ export class SubstrateSandbox extends BaseSandbox {
 			},
 		);
 	}
-	async copyFile(_id: string, request: CopyFileRequest): Promise<void> {
+	async copyFile(_id: string, request: CopyFileRequest, abortSignal?: AbortSignal): Promise<void> {
 		await this.request('/files/copy', {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify(request),
+			signal: abortSignal,
 		});
 	}
-	async moveFile(_id: string, request: MoveFileRequest): Promise<void> {
+	async moveFile(_id: string, request: MoveFileRequest, abortSignal?: AbortSignal): Promise<void> {
 		await this.request('/files/move', {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify(request),
+			signal: abortSignal,
 		});
 	}
-	async mkdir(_id: string, path: string, recursive = false): Promise<void> {
-		await this.request('/mkdir', { method: 'POST' }, { path, recursive: String(recursive) });
+	async mkdir(
+		_id: string,
+		path: string,
+		recursive = false,
+		abortSignal?: AbortSignal,
+	): Promise<void> {
+		await this.request(
+			'/mkdir',
+			{ method: 'POST', signal: abortSignal },
+			{ path, recursive: String(recursive) },
+		);
 	}
-	async listFiles(_id: string, options?: ListFilesOptions) {
+	async listFiles(_id: string, options?: ListFilesOptions, abortSignal?: AbortSignal) {
 		return z
 			.array(fileEntry)
-			.parse(await (await this.request('/files', {}, { path: options?.path ?? '/' })).json());
+			.parse(
+				await (
+					await this.request('/files', { signal: abortSignal }, { path: options?.path ?? '/' })
+				).json(),
+			);
 	}
-	async stat(_id: string, path: string) {
-		return fileStat.parse(await (await this.request('/stat', {}, { path })).json());
+	async stat(_id: string, path: string, abortSignal?: AbortSignal) {
+		return fileStat.parse(
+			await (await this.request('/stat', { signal: abortSignal }, { path })).json(),
+		);
 	}
 }

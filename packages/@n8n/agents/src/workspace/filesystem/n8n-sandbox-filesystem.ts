@@ -4,7 +4,7 @@ import { dirname } from 'node:path/posix';
 import { BaseFilesystem, type BaseFilesystemOptions } from './base-filesystem';
 import { raceWithAbort } from '../../sdk/abort';
 import type { N8nSandboxServiceSandbox } from '../sandbox/n8n-sandbox-sandbox';
-import type { SubstrateSandbox } from '../sandbox/substrate-sandbox';
+import { SubstrateSandbox } from '../sandbox/substrate-sandbox';
 import type {
 	AbortableOptions,
 	AppendOptions,
@@ -68,7 +68,10 @@ export class N8nSandboxFilesystem extends BaseFilesystem {
 
 	async readFile(path: string, options?: ReadOptions): Promise<string | Buffer> {
 		return await this.withSandbox(options?.abortSignal, async (client, sandboxId) => {
-			const content = await client.readFile(sandboxId, path);
+			const content =
+				this.sandbox instanceof SubstrateSandbox
+					? await this.sandbox.readFile(sandboxId, path, options?.abortSignal)
+					: await client.readFile(sandboxId, path);
 			if (options?.encoding) {
 				return content.toString(options.encoding);
 			}
@@ -81,52 +84,91 @@ export class N8nSandboxFilesystem extends BaseFilesystem {
 			if (options?.recursive) {
 				const parent = getParentDirectory(path);
 				if (parent) {
-					await client.mkdir(sandboxId, parent, true);
+					if (this.sandbox instanceof SubstrateSandbox) {
+						await this.sandbox.mkdir(sandboxId, parent, true, options.abortSignal);
+					} else {
+						await client.mkdir(sandboxId, parent, true);
+					}
 				}
 			}
-			await client.writeFile(sandboxId, path, content, options?.overwrite ?? true);
+			if (this.sandbox instanceof SubstrateSandbox) {
+				await this.sandbox.writeFile(
+					sandboxId,
+					path,
+					content,
+					options?.overwrite ?? true,
+					options?.abortSignal,
+				);
+			} else {
+				await client.writeFile(sandboxId, path, content, options?.overwrite ?? true);
+			}
 		});
 	}
 
 	async appendFile(path: string, content: FileContent, options?: AppendOptions): Promise<void> {
 		await this.withSandbox(options?.abortSignal, async (client, sandboxId) => {
-			await client.appendFile(sandboxId, path, content);
+			if (this.sandbox instanceof SubstrateSandbox) {
+				await this.sandbox.appendFile(sandboxId, path, content, options?.abortSignal);
+			} else {
+				await client.appendFile(sandboxId, path, content);
+			}
 		});
 	}
 
 	async deleteFile(path: string, options?: RemoveOptions): Promise<void> {
 		await this.withSandbox(options?.abortSignal, async (client, sandboxId) => {
-			await client.deleteFile(sandboxId, path, {
-				recursive: options?.recursive,
-				force: options?.force,
-			});
+			const deleteOptions = { recursive: options?.recursive, force: options?.force };
+			if (this.sandbox instanceof SubstrateSandbox) {
+				await this.sandbox.deleteFile(sandboxId, path, deleteOptions, options?.abortSignal);
+			} else {
+				await client.deleteFile(sandboxId, path, deleteOptions);
+			}
 		});
 	}
 
 	async copyFile(src: string, dest: string, options?: CopyOptions): Promise<void> {
 		await this.withSandbox(options?.abortSignal, async (client, sandboxId) => {
-			await client.copyFile(sandboxId, {
+			const request = {
 				src,
 				dest,
 				recursive: options?.recursive,
 				overwrite: options?.overwrite,
-			});
+			};
+			if (this.sandbox instanceof SubstrateSandbox) {
+				await this.sandbox.copyFile(sandboxId, request, options?.abortSignal);
+			} else {
+				await client.copyFile(sandboxId, request);
+			}
 		});
 	}
 
 	async moveFile(src: string, dest: string, options?: CopyOptions): Promise<void> {
 		await this.withSandbox(options?.abortSignal, async (client, sandboxId) => {
-			await client.moveFile(sandboxId, {
+			const request = {
 				src,
 				dest,
 				overwrite: options?.overwrite,
-			});
+			};
+			if (this.sandbox instanceof SubstrateSandbox) {
+				await this.sandbox.moveFile(sandboxId, request, options?.abortSignal);
+			} else {
+				await client.moveFile(sandboxId, request);
+			}
 		});
 	}
 
 	async mkdir(path: string, options?: MkdirOptions): Promise<void> {
 		await this.withSandbox(options?.abortSignal, async (client, sandboxId) => {
-			await client.mkdir(sandboxId, path, options?.recursive ?? false);
+			if (this.sandbox instanceof SubstrateSandbox) {
+				await this.sandbox.mkdir(
+					sandboxId,
+					path,
+					options?.recursive ?? false,
+					options?.abortSignal,
+				);
+			} else {
+				await client.mkdir(sandboxId, path, options?.recursive ?? false);
+			}
 		});
 	}
 
@@ -136,7 +178,10 @@ export class N8nSandboxFilesystem extends BaseFilesystem {
 
 	async readdir(path: string, options?: ListOptions): Promise<FileEntry[]> {
 		return await this.withSandbox(options?.abortSignal, async (client, sandboxId) => {
-			const files = await client.listFiles(sandboxId, { path });
+			const files =
+				this.sandbox instanceof SubstrateSandbox
+					? await this.sandbox.listFiles(sandboxId, { path }, options?.abortSignal)
+					: await client.listFiles(sandboxId, { path });
 			return files.map((entry) => ({
 				name: entry.name,
 				type: entry.isDir ? 'directory' : 'file',
@@ -159,7 +204,10 @@ export class N8nSandboxFilesystem extends BaseFilesystem {
 
 	async stat(path: string, options?: AbortableOptions): Promise<FileStat> {
 		return await this.withSandbox(options?.abortSignal, async (client, sandboxId) => {
-			const stat = await client.stat(sandboxId, path);
+			const stat =
+				this.sandbox instanceof SubstrateSandbox
+					? await this.sandbox.stat(sandboxId, path, options?.abortSignal)
+					: await client.stat(sandboxId, path);
 			return {
 				name: stat.name,
 				path: stat.path,

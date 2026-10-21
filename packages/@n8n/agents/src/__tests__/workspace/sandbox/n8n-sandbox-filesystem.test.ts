@@ -2,6 +2,7 @@ import { SandboxServiceError } from '@n8n/sandbox-client';
 
 import { N8nSandboxFilesystem } from '../../../workspace/filesystem/n8n-sandbox-filesystem';
 import { N8nSandboxServiceSandbox } from '../../../workspace/sandbox/n8n-sandbox-sandbox';
+import { SubstrateSandbox } from '../../../workspace/sandbox/substrate-sandbox';
 
 const mockMkdir = vi.fn();
 const mockWriteFile = vi.fn();
@@ -38,6 +39,20 @@ function createFilesystem() {
 	});
 	vi.spyOn(sandbox, 'ensureRunning').mockResolvedValue(undefined);
 	return new N8nSandboxFilesystem(sandbox);
+}
+
+function createSubstrateFilesystem() {
+	const sandbox = new SubstrateSandbox({
+		endpoint: 'localhost:18443',
+		routerUrl: 'http://localhost:18000',
+		atespace: 'test-space',
+		template: 'test-template',
+		tokenFile: '/run/substrate/token',
+		caFile: '/run/substrate/ca.crt',
+		serverName: 'api.ate-system.svc',
+	});
+	vi.spyOn(sandbox, 'ensureRunning').mockResolvedValue(undefined);
+	return { filesystem: new N8nSandboxFilesystem(sandbox), sandbox };
 }
 
 describe('N8nSandboxFilesystem', () => {
@@ -77,6 +92,16 @@ describe('N8nSandboxFilesystem', () => {
 
 		expect(content).toBe('file content');
 		expect(mockReadFile).toHaveBeenCalledWith('sb-test', '/workspace/file.txt');
+	});
+
+	it('forwards cancellation to Substrate filesystem requests', async () => {
+		const { filesystem, sandbox } = createSubstrateFilesystem();
+		const signal = AbortSignal.timeout(1_000);
+		const readFile = vi.spyOn(sandbox, 'readFile').mockResolvedValue(Buffer.from('file content'));
+
+		await filesystem.readFile('/workspace/file.txt', { abortSignal: signal });
+
+		expect(readFile).toHaveBeenCalledWith(sandbox.id, '/workspace/file.txt', signal);
 	});
 
 	it('returns false from exists on SandboxServiceError 404', async () => {

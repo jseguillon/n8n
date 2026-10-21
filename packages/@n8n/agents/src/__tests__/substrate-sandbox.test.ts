@@ -59,6 +59,17 @@ describe('Substrate sandbox daemon protocol', () => {
 		expect(fetch.mock.calls[0][1].headers['ate-target-actor']).toBe(`test-space/${sandbox.id}`);
 	});
 
+	it('forwards file operation cancellation to the router', async () => {
+		const fetch = vi.fn().mockResolvedValue(new Response('ok'));
+		vi.stubGlobal('fetch', fetch);
+		const sandbox = new SubstrateSandbox(connection);
+		const signal = AbortSignal.timeout(1_000);
+
+		await sandbox.readFile(sandbox.id, '/home/user/check.txt', signal);
+
+		expect(fetch).toHaveBeenCalledWith(expect.any(URL), expect.objectContaining({ signal }));
+	});
+
 	it('reads split execution events and rejects incomplete streams', async () => {
 		vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
 		const encoder = new TextEncoder();
