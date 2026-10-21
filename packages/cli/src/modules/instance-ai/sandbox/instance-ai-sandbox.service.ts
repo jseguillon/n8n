@@ -584,10 +584,9 @@ export class InstanceAiSandboxService {
 
 	/**
 	 * Delete the remote sandbox for a thread with no cache entry (after a
-	 * restart or an idle eviction). Only the n8n-sandbox provider supports
-	 * this: its id is recomputable from the thread id, and a delete for an id
-	 * that never existed is a cheap 404. Daytona is left to its own
-	 * auto-stop/auto-delete lifecycle.
+	 * restart or an idle eviction). The n8n-sandbox and Substrate providers use
+	 * thread-derived ids, so deleting a missing remote is safe. Daytona is left
+	 * to its own auto-stop/auto-delete lifecycle.
 	 */
 	private async destroyUncachedSandbox(
 		threadId: string,
@@ -595,11 +594,9 @@ export class InstanceAiSandboxService {
 		userId?: string,
 	): Promise<void> {
 		try {
-			if (
-				!this.instanceAiConfig.sandboxEnabled ||
-				normalizeSandboxProvider(this.instanceAiConfig.sandboxProvider) !== 'n8n-sandbox'
-			)
-				return;
+			if (!this.instanceAiConfig.sandboxEnabled) return;
+			const provider = normalizeSandboxProvider(this.instanceAiConfig.sandboxProvider);
+			if (provider !== 'n8n-sandbox' && provider !== 'substrate') return;
 
 			await withSandboxLifecycleTrace(
 				threadId,
@@ -607,14 +604,22 @@ export class InstanceAiSandboxService {
 				{ reason, cached: false },
 				async () => {
 					const base = this.getSandboxConfigFromEnv();
-					if (!base.enabled || base.provider !== 'n8n-sandbox') return;
+					if (!base.enabled || (base.provider !== 'n8n-sandbox' && base.provider !== 'substrate'))
+						return;
 
-					const settings = await this.options.settingsService.resolveN8nSandboxConfig();
+					const settings =
+						base.provider === 'n8n-sandbox'
+							? await this.options.settingsService.resolveN8nSandboxConfig()
+							: undefined;
 					const config = withThreadScopedSandboxIdentity(
 						{
 							...base,
-							serviceUrl: settings.serviceUrl ?? base.serviceUrl,
-							apiKey: settings.apiKey ?? base.apiKey,
+							...(base.provider === 'n8n-sandbox'
+								? {
+										serviceUrl: settings?.serviceUrl ?? base.serviceUrl,
+										apiKey: settings?.apiKey ?? base.apiKey,
+									}
+								: {}),
 						},
 						threadId,
 					);

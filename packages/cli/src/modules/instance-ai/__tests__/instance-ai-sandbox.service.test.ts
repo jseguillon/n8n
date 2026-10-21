@@ -1060,6 +1060,38 @@ describe('InstanceAiSandboxService', () => {
 			expect(withSandboxLifecycleTrace).toHaveBeenCalledTimes(1);
 		});
 
+		it('deletes the uncached remote Actor for the Substrate provider', async () => {
+			// No prior getOrCreateWorkspace call: simulates a thread deleted after
+			// a restart or idle eviction, when the in-process cache has no entry.
+			const { service } = createSandboxService({
+				config: {
+					sandboxEnabled: true,
+					sandboxProvider: 'substrate',
+					substrateEndpoint: 'api.ate-system.svc:443',
+					substrateRouterUrl: 'https://router.example',
+					substrateAtespace: 'n8n',
+					substrateTemplate: 'sandbox',
+					substrateTokenFile: '/run/secrets/token',
+					substrateCaFile: '/run/secrets/ca.crt',
+					substrateServerName: 'api.ate-system.svc',
+				},
+			});
+			const sandbox = { destroy: vi.fn(async () => {}) };
+			(createSandbox as Mock).mockResolvedValue(sandbox);
+
+			await service.destroySandbox('thread-1');
+
+			expect(createSandbox).toHaveBeenCalledWith(
+				expect.objectContaining({
+					provider: 'substrate',
+					id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+				}),
+				expect.any(Object),
+			);
+			expect(sandbox.destroy).toHaveBeenCalledTimes(1);
+			expect(withSandboxLifecycleTrace).toHaveBeenCalledTimes(1);
+		});
+
 		it.each([
 			{ sandboxEnabled: false, sandboxProvider: 'n8n-sandbox' },
 			{ sandboxEnabled: false, sandboxProvider: 'daytona' },
