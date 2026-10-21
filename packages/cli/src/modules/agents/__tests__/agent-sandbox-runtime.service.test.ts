@@ -92,6 +92,19 @@ function makeSandboxSettingsService(
 		serviceUrl: 'https://sandbox.example',
 		apiKey: 'sandbox-key',
 	});
+	service.getSubstrateConfig.mockReturnValue({
+		enabled: true,
+		provider: 'substrate',
+		connection: {
+			endpoint: 'api.ate-system.svc:443',
+			routerUrl: 'https://router.example',
+			atespace: 'n8n',
+			template: 'sandbox',
+			tokenFile: '/run/secrets/token',
+			caFile: '/run/secrets/ca.crt',
+			serverName: 'api.ate-system.svc',
+		},
+	});
 	return service;
 }
 
@@ -325,6 +338,20 @@ describe('AgentSandboxRuntimeService', () => {
 		expect(createSandboxMock.mock.calls.map(([config]) => config.ephemeral)).toEqual([false, true]);
 	});
 
+	it('rejects ephemeral Substrate knowledge Actors until an external cleanup controller is configured', async () => {
+		const service = makeService({
+			configOverrides: { sandboxEphemeral: true },
+			sandboxSettingsService: makeSandboxSettingsService('substrate'),
+		});
+
+		await service.acquireWorkspaceSandbox(projectId, agentId, principalHash);
+		await expect(service.acquireKnowledgeSandbox(projectId, agentId)).rejects.toThrow(
+			'N8N_AGENTS_AI_SANDBOX_EPHEMERAL',
+		);
+
+		expect(createSandboxMock.mock.calls.map(([config]) => config.ephemeral)).toEqual([false]);
+	});
+
 	it('reports how to configure a missing n8n sandbox service URL', async () => {
 		const settingsService = makeSandboxSettingsService('n8n-sandbox');
 		settingsService.resolveN8nSandboxConfig.mockResolvedValue({});
@@ -414,7 +441,9 @@ describe('AgentSandboxRuntimeService', () => {
 		expect(destroyedIds).toEqual([
 			`agent-ws-${workspaceSandboxId}`,
 			workspaceSandboxId,
+			workspaceSandboxId,
 			`agent-kb-${knowledgeSandboxId}`,
+			knowledgeSandboxId,
 			knowledgeSandboxId,
 		]);
 	});

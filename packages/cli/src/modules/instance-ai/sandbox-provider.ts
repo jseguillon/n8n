@@ -19,7 +19,13 @@ export function substrateSandboxConfig(config: InstanceAiConfig): SubstrateSandb
 			'Configure the SUBSTRATE_API_ENDPOINT, SUBSTRATE_ROUTER_URL, SUBSTRATE_ATESPACE, SUBSTRATE_ACTOR_TEMPLATE, SUBSTRATE_TOKEN_FILE and SUBSTRATE_CA_FILE environment variables.',
 		);
 	}
-	return { enabled: true, provider: 'substrate', connection, timeout: config.sandboxTimeout };
+	return {
+		enabled: true,
+		provider: 'substrate',
+		connection,
+		timeout: config.sandboxTimeout,
+		ephemeral: config.sandboxEphemeral,
+	};
 }
 
 /** Coerce a raw config/env value to a supported provider, falling back to the default. */

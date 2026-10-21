@@ -252,6 +252,11 @@ export class AgentSandboxRuntimeService {
 		lifecycle: SandboxLifecycle,
 		startOptions: SandboxStartOptions,
 	): Promise<AgentSandboxRuntime> {
+		if (provider === 'substrate' && lifecycle.ephemeral) {
+			throw new OperationalError(
+				'Agent Substrate sandboxes do not support N8N_AGENTS_AI_SANDBOX_EPHEMERAL. Configure an external Actor cleanup controller before enabling ephemeral Agent sandboxes.',
+			);
+		}
 		let pending = this.pendingSandboxAcquisitions.get(cacheKey);
 
 		if (!pending) {
@@ -361,7 +366,11 @@ export class AgentSandboxRuntimeService {
 
 		const config =
 			provider === 'substrate'
-				? { ...this.sandboxSettingsService.getSubstrateConfig(), id: n8nSandboxId }
+				? {
+						...this.sandboxSettingsService.getSubstrateConfig(),
+						id: n8nSandboxId,
+						ephemeral: false,
+					}
 				: provider === 'daytona'
 					? await this.resolveDaytonaSandboxConfig(projectId, daytonaName, labels, lifecycle)
 					: await this.resolveN8nSandboxConfig(n8nSandboxId, lifecycle);

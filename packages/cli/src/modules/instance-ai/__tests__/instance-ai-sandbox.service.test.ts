@@ -856,6 +856,40 @@ describe('InstanceAiSandboxService', () => {
 	});
 
 	describe('expiry timers', () => {
+		it('stops an idle ephemeral Substrate Actor before evicting its cache entry', async () => {
+			vi.useFakeTimers();
+			try {
+				const { service } = createSandboxService({
+					config: {
+						sandboxEnabled: true,
+						sandboxProvider: 'substrate',
+						sandboxEphemeral: true,
+						builderSandboxTtlMs: 1000,
+						substrateEndpoint: 'api.ate-system.svc:443',
+						substrateRouterUrl: 'https://router.example',
+						substrateAtespace: 'n8n',
+						substrateTemplate: 'sandbox',
+						substrateTokenFile: '/run/secrets/token',
+						substrateCaFile: '/run/secrets/ca.crt',
+						substrateServerName: 'api.ate-system.svc',
+					},
+				});
+				const sandbox = { id: 'sandbox-1', provider: 'substrate', _stop: vi.fn(async () => {}) };
+				const workspace = { init: vi.fn(async () => {}), destroy: vi.fn(async () => {}) };
+				(createSandbox as Mock).mockResolvedValue(sandbox);
+				(createWorkspace as Mock).mockReturnValue(workspace);
+				(setupSandboxWorkspace as Mock).mockResolvedValue(undefined);
+
+				await service.getOrCreateWorkspace('thread-1', fakeUser, {} as InstanceAiContext);
+				await vi.advanceTimersByTimeAsync(1000);
+
+				expect(sandbox._stop).toHaveBeenCalledTimes(1);
+				expect(workspace.destroy).not.toHaveBeenCalled();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
 		it('evicts expired runtime sandbox entries without destroying the provider workspace', async () => {
 			vi.useFakeTimers();
 			try {

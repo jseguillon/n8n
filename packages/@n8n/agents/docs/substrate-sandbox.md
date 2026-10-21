@@ -42,10 +42,14 @@ The server reads the connection from its environment in both cases.
 
 ## Lifecycle
 
-`stop()` suspends the Actor. A router request can wake it and restore its state.
-`destroy()` deletes it. Verification workspaces are deleted after the probe.
+`stop()` suspends persistent Actors. It deletes ephemeral Actors. A router request
+can wake a suspended Actor and restore its state. `destroy()` deletes it.
+Verification workspaces are deleted after the probe.
 Substrate does not implement the Daytona idle timers in n8n. Use an external idle
-controller to suspend inactive Actors.
+controller to suspend inactive persistent Actors. Instance AI deletes its own
+ephemeral Actors at cache expiry. Agent knowledge sandboxes reject
+`N8N_AGENTS_AI_SANDBOX_EPHEMERAL=true` until an external cleanup controller is
+configured for their deterministic Actor identities.
 
 The ActorTemplate must run the sandbox daemon on port 80 and prepare
 `/home/user/workspace`. Commands run under the daemon's configured user.

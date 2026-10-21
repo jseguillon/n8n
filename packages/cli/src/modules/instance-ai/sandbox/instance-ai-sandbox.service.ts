@@ -45,8 +45,10 @@ export type RuntimeSandboxEntry = {
 	verifiedBundles: VerifiedWorkspaceBundles;
 	setupComplete: boolean;
 	setupPromise: Promise<void> | undefined;
+	ephemeral: boolean;
 	expiresAt: number;
 	cleanupTimer?: ReturnType<typeof setTimeout>;
+	idleStopPromise?: Promise<void>;
 };
 
 type SandboxCacheState = { fingerprint: string; config?: SandboxConfig };
@@ -366,15 +368,10 @@ export class InstanceAiSandboxService {
 				}
 				const existing = this.sandboxes.get(threadId);
 				if (existing) {
-					if (
-						existing.configFingerprint !== cacheState.fingerprint ||
-						(this.isSandboxEntryExpired(existing) && !this.isSandboxInUse(threadId))
-					) {
-						this.evictSandboxEntry(
-							threadId,
-							existing,
-							existing.configFingerprint !== cacheState.fingerprint ? 'config_changed' : 'idle',
-						);
+					if (existing.configFingerprint !== cacheState.fingerprint) {
+						this.evictSandboxEntry(threadId, existing, 'config_changed');
+					} else if (this.isSandboxEntryExpired(existing) && !this.isSandboxInUse(threadId)) {
+						await this.evictIdleSandboxEntry(threadId, existing);
 					} else {
 						this.touchSandboxEntry(threadId, existing);
 						outcome = 'cached';
@@ -495,6 +492,7 @@ export class InstanceAiSandboxService {
 			verifiedBundles: new Map(),
 			setupComplete: false,
 			setupPromise: undefined,
+			ephemeral: config.ephemeral === true,
 			expiresAt: this.nextSandboxExpiry(),
 		};
 		return entry;
@@ -682,10 +680,8 @@ export class InstanceAiSandboxService {
 		if (this.sandboxTtlMs <= 0) return;
 		if (entry.cleanupTimer) clearTimeout(entry.cleanupTimer);
 
-		// The provider reclaims the remote sandbox (Daytona auto-stop, sandbox-service
-		// idle reaping), and the deterministic identity lets a later request reattach
-		// while it is still alive. This timer only drops our in-process cache entry
-		// so the map cannot grow indefinitely.
+		// Most providers reclaim remote sandboxes. Substrate has no native idle reaper,
+		// so an ephemeral Actor is stopped here and its adapter deletes it.
 		const delay = Math.max(0, entry.expiresAt - Date.now());
 		entry.cleanupTimer = setTimeout(() => {
 			const current = this.sandboxes.get(threadId);
@@ -694,9 +690,46 @@ export class InstanceAiSandboxService {
 				this.touchSandboxEntry(threadId, entry);
 				return;
 			}
-			this.evictSandboxEntry(threadId, entry, 'idle', true);
+			void this.evictIdleSandboxEntry(threadId, entry, true);
 		}, delay);
 		entry.cleanupTimer.unref();
+	}
+
+	private async evictIdleSandboxEntry(
+		threadId: string,
+		entry: RuntimeSandboxEntry,
+		detached = false,
+	): Promise<void> {
+		if (this.sandboxes.get(threadId) !== entry) return;
+		if (entry.idleStopPromise) {
+			await entry.idleStopPromise;
+			return;
+		}
+
+		const stop = entry.sandbox._stop?.bind(entry.sandbox);
+		if (!entry.ephemeral || entry.sandbox.provider !== 'substrate' || !stop) {
+			this.evictSandboxEntry(threadId, entry, 'idle', detached);
+			return;
+		}
+
+		entry.idleStopPromise = withSandboxLifecycleTrace(
+			threadId,
+			'stop',
+			{ reason: 'idle', sandboxId: entry.sandbox.id, provider: entry.sandbox.provider },
+			async () => await stop(),
+			{ resolveConfig: this.lifecycleTraceConfig(threadId, entry.userId), detached },
+		);
+		try {
+			await entry.idleStopPromise;
+		} catch (error) {
+			this.logger.warn('Failed to stop idle ephemeral sandbox', {
+				threadId,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		} finally {
+			entry.idleStopPromise = undefined;
+			this.evictSandboxEntry(threadId, entry, 'idle', detached);
+		}
 	}
 
 	stopSandboxExpiryTimers(): void {

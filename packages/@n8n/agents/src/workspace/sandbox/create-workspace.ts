@@ -26,7 +26,12 @@ function buildSandbox(
 
 	const provider = config.provider;
 	if (provider === 'substrate') {
-		return new SubstrateSandbox({ ...config.connection, id: config.id, timeout: config.timeout });
+		return new SubstrateSandbox({
+			...config.connection,
+			id: config.id,
+			timeout: config.timeout,
+			ephemeral: config.ephemeral,
+		});
 	}
 
 	if (provider === 'daytona') {

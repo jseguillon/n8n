@@ -19,6 +19,19 @@ afterEach(() => {
 });
 
 describe('Substrate sandbox daemon protocol', () => {
+	it('suspends persistent Actors and deletes ephemeral Actors on stop', async () => {
+		const controlCall = vi.spyOn(SubstrateControl.prototype, 'call').mockResolvedValue(undefined);
+		const deleteActor = vi.spyOn(SubstrateControl.prototype, 'deleteActor').mockResolvedValue();
+		const persistent = new SubstrateSandbox(connection);
+		const ephemeral = new SubstrateSandbox({ ...connection, ephemeral: true });
+
+		await persistent.stop();
+		await ephemeral.stop();
+
+		expect(controlCall).toHaveBeenCalledWith('SuspendActor', persistent.id);
+		expect(deleteActor).toHaveBeenCalledWith(ephemeral.id);
+	});
+
 	it('maps daemon file metadata to the shared filesystem contract', async () => {
 		const fetch = vi
 			.fn()

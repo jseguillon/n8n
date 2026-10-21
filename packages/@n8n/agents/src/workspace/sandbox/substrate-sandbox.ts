@@ -49,6 +49,7 @@ const eventSchema = z.discriminatedUnion('type', [
 export interface SubstrateSandboxOptions extends SubstrateConnection {
 	id?: string;
 	timeout?: number;
+	ephemeral?: boolean;
 }
 
 /** Each n8n workspace has its own Actor. The router wakes suspended Actors. */
@@ -79,6 +80,10 @@ export class SubstrateSandbox extends BaseSandbox {
 	}
 
 	async stop(): Promise<void> {
+		if (this.options.ephemeral) {
+			await this.control.deleteActor(this.id);
+			return;
+		}
 		await this.control.call('SuspendActor', this.id);
 	}
 
