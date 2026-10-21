@@ -1,5 +1,6 @@
 import { DaytonaSandbox } from './daytona-sandbox';
 import { N8nSandboxServiceSandbox } from './n8n-sandbox-sandbox';
+import { SubstrateSandbox } from './substrate-sandbox';
 import type {
 	CreateSandboxOptions,
 	SandboxConfig,
@@ -24,6 +25,9 @@ function buildSandbox(
 	if (!config.enabled) return undefined;
 
 	const provider = config.provider;
+	if (provider === 'substrate') {
+		return new SubstrateSandbox({ ...config.connection, id: config.id, timeout: config.timeout });
+	}
 
 	if (provider === 'daytona') {
 		const mode = config.getAuthToken ? 'proxy' : 'direct';
@@ -82,7 +86,7 @@ export function createFilesystem(
 ): SandboxFilesystem | undefined {
 	if (!sandbox) return undefined;
 
-	if (sandbox instanceof N8nSandboxServiceSandbox) {
+	if (sandbox instanceof N8nSandboxServiceSandbox || sandbox instanceof SubstrateSandbox) {
 		return new N8nSandboxFilesystem(sandbox, options);
 	}
 

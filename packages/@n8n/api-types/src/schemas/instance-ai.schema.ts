@@ -2397,7 +2397,7 @@ export function resolveInstanceAiPermissions(
 // Admin settings — instance-scoped, admin-only
 // ---------------------------------------------------------------------------
 
-export const instanceAiSandboxProviderSchema = z.enum(['n8n-sandbox', 'daytona']);
+export const instanceAiSandboxProviderSchema = z.enum(['n8n-sandbox', 'daytona', 'substrate']);
 export type InstanceAiSandboxProvider = z.infer<typeof instanceAiSandboxProviderSchema>;
 
 export function isInstanceAiSandboxProvider(value: unknown): value is InstanceAiSandboxProvider {
@@ -2515,14 +2515,16 @@ export function deriveInstanceAiSetupState(
 			? 'ui'
 			: 'none';
 	const sandboxCredentialId =
-		settings.sandboxProvider === 'daytona'
-			? settings.daytonaCredentialId
-			: settings.n8nSandboxCredentialId;
+		settings.sandboxProvider === 'substrate'
+			? null
+			: settings.sandboxProvider === 'daytona'
+				? settings.daytonaCredentialId
+				: settings.n8nSandboxCredentialId;
 	const sandboxSource: InstanceAiComponentSource = !settings.sandboxEnabled
 		? 'none'
 		: settings.sandboxEnvConfigured
 			? 'env'
-			: sandboxCredentialId
+			: settings.sandboxProvider === 'substrate' || sandboxCredentialId
 				? 'ui'
 				: 'none';
 	const webSearchSource: InstanceAiWebSearchSource = settings.searchCredentialId

@@ -33,7 +33,7 @@ const setupSnapshotProps = {
 			'Selected model name. Null when not configured; on the page-view event also null when the name is env-managed, which the emitting frontend cannot resolve — "AI Assistant setup completed" carries the resolved name',
 		),
 	sandbox_source: z.enum(['ui', 'env', 'none']),
-	sandbox_type: z.enum(['n8n-sandbox', 'daytona']).nullable(),
+	sandbox_type: z.enum(['n8n-sandbox', 'daytona', 'substrate']).nullable(),
 	web_search_source: z
 		.enum(['ui', 'env', 'disabled', 'none'])
 		.describe(
@@ -444,9 +444,9 @@ export const INSTANCE_AI_TELEMETRY = defineTelemetryEvents({
 		description:
 			'An admin saved an n8n Assistant sandbox connection (PUT /instance-ai/settings), covering the first connect, later changes, and same-provider key rotations: first connects are rows where previous_sandbox_type is absent. Env-var sandbox config never emits this.',
 		properties: z.object({
-			sandbox_type: z.enum(['n8n-sandbox', 'daytona']),
+			sandbox_type: z.enum(['n8n-sandbox', 'daytona', 'substrate']),
 			previous_sandbox_type: z
-				.enum(['n8n-sandbox', 'daytona'])
+				.enum(['n8n-sandbox', 'daytona', 'substrate'])
 				.optional()
 				.describe(
 					'Absent when nothing was configured before — an absent value marks a first connect',

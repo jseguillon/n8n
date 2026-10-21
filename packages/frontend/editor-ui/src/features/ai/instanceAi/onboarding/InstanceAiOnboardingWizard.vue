@@ -104,7 +104,7 @@ const modelProvider = ref<InstanceAiModelProvider>('anthropic');
 const modelApiKey = ref('');
 const modelBaseUrl = ref('');
 const modelName = ref<string>(DEFAULT_MODEL_NAME);
-const sandboxProvider = ref<'n8n-sandbox' | 'daytona' | null>(null);
+const sandboxProvider = ref<'n8n-sandbox' | 'daytona' | 'substrate' | null>(null);
 const sandboxServiceUrl = ref('');
 const sandboxApiKey = ref('');
 const daytonaApiKey = ref('');
@@ -141,9 +141,11 @@ const isProxyDaytonaSelection = computed(
 function assignedCredentialId(): string | null {
 	if (props.step === 'model') return store.settings?.modelCredentialId ?? null;
 	if (props.step === 'sandbox') {
-		return store.settings?.sandboxProvider === 'daytona'
-			? (store.settings?.daytonaCredentialId ?? null)
-			: (store.settings?.n8nSandboxCredentialId ?? null);
+		return store.settings?.sandboxProvider === 'substrate'
+			? null
+			: store.settings?.sandboxProvider === 'daytona'
+				? (store.settings?.daytonaCredentialId ?? null)
+				: (store.settings?.n8nSandboxCredentialId ?? null);
 	}
 	if (props.step === 'search') return store.settings?.searchCredentialId ?? null;
 	return null;
@@ -234,6 +236,8 @@ const stepReady = computed(() => {
 				: true;
 		}
 		if (isProxyDaytonaSelection.value) return true;
+		// Substrate connection details come from the server environment, so nothing else is required here.
+		if (sandboxProvider.value === 'substrate') return true;
 		if (sandboxProvider.value === 'daytona') return Boolean(daytonaApiKey.value.trim());
 		if (sandboxProvider.value === 'n8n-sandbox') {
 			return Boolean(sandboxServiceUrl.value.trim() && sandboxApiKey.value.trim());
@@ -378,6 +382,10 @@ async function hydrateSandbox(generation: number): Promise<void> {
 	sandboxApiKey.value = '';
 	daytonaApiKey.value = '';
 	if (sandboxEnvManaged.value) return;
+	if (store.settings?.sandboxProvider === 'substrate') {
+		sandboxProvider.value = 'substrate';
+		return;
+	}
 	const isDaytona = store.settings?.sandboxProvider === 'daytona';
 	const credentialId = isDaytona
 		? store.settings?.daytonaCredentialId
@@ -558,6 +566,12 @@ async function saveVerifiedSandbox(connection: InstanceAiConnectionUpdate): Prom
 	return saved;
 }
 
+async function saveSubstrateSandbox(): Promise<boolean> {
+	store.setField('sandboxProvider', 'substrate');
+	store.setField('sandboxEnabled', true);
+	return await store.save(false);
+}
+
 async function saveSearchDecision(connection?: InstanceAiConnectionUpdate): Promise<boolean> {
 	if (searchProvider.value === 'disabled') {
 		store.setField('searchDisabled', true);
@@ -623,6 +637,9 @@ async function runVerification(): Promise<InstanceAiVerificationResponse | null>
 			return await store.verifySandbox({ provider: store.settings?.sandboxProvider });
 		}
 		if (isProxyDaytonaSelection.value) return { ok: true };
+		if (sandboxProvider.value === 'substrate') {
+			return await store.verifySandbox({ provider: 'substrate' });
+		}
 		const connection = sandboxConnection();
 		if (!connection || !sandboxProvider.value) return null;
 		return await store.verifySandbox({
@@ -669,6 +686,8 @@ async function handlePrimary(): Promise<void> {
 			} else if (isProxyDaytonaSelection.value) {
 				store.setField('sandboxProvider', 'daytona');
 				saved = await store.save(false);
+			} else if (sandboxProvider.value === 'substrate') {
+				saved = await saveSubstrateSandbox();
 			} else {
 				const connection = sandboxConnection();
 				saved = connection ? await saveVerifiedSandbox(connection) : false;
@@ -725,6 +744,23 @@ const successMessage = computed(() => {
 });
 const modelProviderLabel = (provider: (typeof INSTANCE_AI_MODEL_PROVIDERS)[number]) =>
 	provider.label ?? i18n.baseText('instanceAi.onboarding.model.customProvider');
+
+function sandboxProviderBadge(provider: (typeof INSTANCE_AI_SANDBOX_PROVIDERS)[number]): string {
+	if (provider.id === 'n8n-sandbox')
+		return i18n.baseText('instanceAi.onboarding.sandbox.freeRecommended');
+	if (provider.id === 'daytona') return i18n.baseText('instanceAi.onboarding.sandbox.paid');
+	return i18n.baseText('instanceAi.onboarding.sandbox.selfHosted');
+}
+
+function sandboxProviderDescription(
+	provider: (typeof INSTANCE_AI_SANDBOX_PROVIDERS)[number],
+): string {
+	if (provider.id === 'n8n-sandbox')
+		return i18n.baseText('instanceAi.onboarding.sandbox.n8nDescription');
+	if (provider.id === 'daytona')
+		return i18n.baseText('instanceAi.onboarding.sandbox.daytonaDescription');
+	return i18n.baseText('instanceAi.onboarding.sandbox.substrateDescription');
+}
 const existingCredentialLabel = (credential: InstanceAiProviderConnection) =>
 	`${credential.name} · ${credentialProviderLabel(credential)}`;
 
@@ -983,43 +1019,40 @@ const stepLede = computed(() => {
 						:data-test-id="surface === 'settings' ? 'n8n-agent-sandbox-provider-select' : undefined"
 						@update:model-value="selectSandboxProvider"
 					>
-						<div
-							v-for="provider in INSTANCE_AI_SANDBOX_PROVIDERS"
-							:key="provider.id"
-							:class="$style.optionCard"
-							:data-test-id="`assistant-sandbox-${provider.id}`"
-							@click="selectSandboxProvider(provider.id)"
-						>
-							<N8nRadioGroupItem
-								:id="`assistant-sandbox-radio-${provider.id}`"
-								:value="provider.id"
-								:aria-label="provider.onboardingLabel"
-								:class="$style.optionControl"
-							/>
-							<span :class="$style.optionCopy">
-								<span :class="$style.optionTitle">
-									<N8nText bold step="sm">{{ provider.onboardingLabel }}</N8nText>
-									<N8nBadge
-										:variant="provider.id === 'n8n-sandbox' ? 'secondary' : 'outline'"
-										:class="$style.optionBadge"
-									>
-										{{
-											provider.id === 'n8n-sandbox'
-												? i18n.baseText('instanceAi.onboarding.sandbox.freeRecommended')
-												: i18n.baseText('instanceAi.onboarding.sandbox.paid')
-										}}
-									</N8nBadge>
-								</span>
-								<N8nText color="text-base" step="sm" :class="$style.optionDescription">
-									{{
+					<div
+						v-for="provider in INSTANCE_AI_SANDBOX_PROVIDERS"
+						:key="provider.id"
+						:class="$style.optionCard"
+						:data-test-id="`assistant-sandbox-${provider.id}`"
+						@click="selectSandboxProvider(provider.id)"
+					>
+						<N8nRadioGroupItem
+							:id="`assistant-sandbox-radio-${provider.id}`"
+							:value="provider.id"
+							:aria-label="provider.onboardingLabel"
+							:class="$style.optionControl"
+						/>
+						<span :class="$style.optionCopy">
+							<span :class="$style.optionTitle">
+								<N8nText bold step="sm">{{ provider.onboardingLabel }}</N8nText>
+								<N8nBadge
+									:variant="
 										provider.id === 'n8n-sandbox'
-											? i18n.baseText('instanceAi.onboarding.sandbox.n8nDescription')
-											: i18n.baseText('instanceAi.onboarding.sandbox.daytonaDescription')
-									}}
-								</N8nText>
+											? 'secondary'
+											: provider.id === 'daytona'
+												? 'outline'
+												: 'subtle'
+									"
+									:class="$style.optionBadge"
+								>
+									{{ sandboxProviderBadge(provider) }}
+								</N8nBadge>
 							</span>
-						</div>
-					</N8nRadioGroup>
+							<N8nText color="text-base" step="sm" :class="$style.optionDescription">
+								{{ sandboxProviderDescription(provider) }}
+							</N8nText>
+						</span>
+					</div>
 
 					<div
 						v-if="!sandboxEnvManaged && sandboxProvider === 'n8n-sandbox'"

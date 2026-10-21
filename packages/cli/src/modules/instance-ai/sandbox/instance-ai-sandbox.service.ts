@@ -24,7 +24,11 @@ import { v5 as uuidv5 } from 'uuid';
 import { N8N_VERSION } from '@/constants';
 import { callAiServiceWithRetry } from '@/utils/ai-service-retry';
 
-import { normalizeSandboxProvider, requireN8nSandboxServiceUrl } from '../sandbox-provider';
+import {
+	normalizeSandboxProvider,
+	requireN8nSandboxServiceUrl,
+	substrateSandboxConfig,
+} from '../sandbox-provider';
 
 const SANDBOX_NAME_MAX_LEN = 63;
 const SANDBOX_LABEL_MAX_LEN = 63;
@@ -117,7 +121,7 @@ function buildThreadScopedSandboxUuid(threadId: string): string {
 function withThreadScopedSandboxIdentity(config: SandboxConfig, threadId: string): SandboxConfig {
 	if (!config.enabled) return config;
 
-	if (config.provider === 'n8n-sandbox') {
+	if (config.provider === 'n8n-sandbox' || config.provider === 'substrate') {
 		return { ...config, id: buildThreadScopedSandboxUuid(threadId) };
 	}
 
@@ -243,6 +247,7 @@ export class InstanceAiSandboxService {
 			};
 		}
 
+		if (provider === 'substrate') return substrateSandboxConfig(this.instanceAiConfig);
 		if (provider === 'daytona') {
 			return {
 				enabled: true,
@@ -277,6 +282,7 @@ export class InstanceAiSandboxService {
 	async resolveSandboxConfig(user: User): Promise<SandboxConfig> {
 		const base = this.getSandboxConfigFromEnv();
 		if (!base.enabled) return base;
+		if (base.provider === 'substrate') return base;
 		if (base.provider === 'daytona') {
 			// If AI assistant service is available, route Daytona calls through its sandbox proxy
 			if (this.options.aiService.isProxyEnabled()) {

@@ -4,6 +4,7 @@ import { dirname } from 'node:path/posix';
 import { BaseFilesystem, type BaseFilesystemOptions } from './base-filesystem';
 import { raceWithAbort } from '../../sdk/abort';
 import type { N8nSandboxServiceSandbox } from '../sandbox/n8n-sandbox-sandbox';
+import type { SubstrateSandbox } from '../sandbox/substrate-sandbox';
 import type {
 	AbortableOptions,
 	AppendOptions,
@@ -30,15 +31,16 @@ export class N8nSandboxFilesystem extends BaseFilesystem {
 
 	readonly name = 'N8nSandboxFilesystem';
 
-	readonly provider = 'n8n-sandbox';
+	readonly provider: string;
 
 	status: ProviderStatus = 'pending';
 
 	constructor(
-		private readonly sandbox: N8nSandboxServiceSandbox,
+		private readonly sandbox: N8nSandboxServiceSandbox | SubstrateSandbox,
 		options?: BaseFilesystemOptions,
 	) {
 		super(options);
+		this.provider = sandbox.provider;
 		this.id = `n8n-sandbox-fs-${sandbox.id}`;
 	}
 
@@ -53,7 +55,7 @@ export class N8nSandboxFilesystem extends BaseFilesystem {
 	private async withSandbox<T>(
 		abortSignal: AbortSignal | undefined,
 		op: (
-			client: ReturnType<N8nSandboxServiceSandbox['getClient']>,
+			client: ReturnType<(N8nSandboxServiceSandbox | SubstrateSandbox)['getClient']>,
 			sandboxId: string,
 		) => Promise<T>,
 	): Promise<T> {

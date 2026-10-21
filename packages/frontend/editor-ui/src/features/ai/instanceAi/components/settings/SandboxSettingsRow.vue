@@ -21,6 +21,7 @@ const isEnvironmentManaged = computed(
 );
 const sandboxValue = computed(() => {
 	if (isEnvironmentManaged.value) return i18n.baseText('instanceAi.onboarding.foundOnServer');
+	if (store.settings?.sandboxProvider === 'substrate') return SANDBOX_PROVIDER_LABELS.substrate;
 	if (sandboxCredentialId.value) {
 		return store.settings?.sandboxProvider === 'daytona'
 			? SANDBOX_PROVIDER_LABELS.daytona
@@ -31,7 +32,7 @@ const sandboxValue = computed(() => {
 const sandboxDescription = computed<{ key: BaseTextKey; warning: boolean }>(() => {
 	if (isEnvironmentManaged.value)
 		return { key: 'settings.n8nAgent.sandbox.env.description', warning: false };
-	if (sandboxCredentialId.value)
+	if (sandboxCredentialId.value || store.settings?.sandboxProvider === 'substrate')
 		return { key: 'settings.n8nAgent.sandbox.set.description', warning: false };
 	return { key: 'settings.n8nAgent.sandbox.missing.description', warning: !props.disabled };
 });

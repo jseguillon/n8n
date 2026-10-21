@@ -21,6 +21,7 @@ import { createAiProxyFetch } from '@/utils/ai-proxy-fetch';
 
 import { InstanceAiModelService } from './instance-ai-model.service';
 import { InstanceAiSettingsService } from './instance-ai-settings.service';
+import { substrateSandboxConfig } from './sandbox-provider';
 
 const VERIFICATION_TIMEOUT_MS = 30_000;
 
@@ -286,6 +287,10 @@ export class InstanceAiVerificationService {
 				timeout: instanceAi.sandboxTimeout,
 				ephemeral: true,
 			};
+		}
+
+		if (provider === 'substrate') {
+			return substrateSandboxConfig(instanceAi);
 		}
 
 		const saved = connection ? undefined : await this.settingsService.resolveN8nSandboxConfig();

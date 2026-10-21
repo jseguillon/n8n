@@ -6,6 +6,7 @@ import {
 	type DaytonaSandboxConfig,
 	type FilesystemLifecycleHook,
 	type N8nSandboxConfig,
+	type SubstrateSandboxConfig,
 	type SandboxProvider,
 	type WorkspaceFilesystem,
 	type WorkspaceSandbox,
@@ -305,6 +306,7 @@ export class AgentSandboxRuntimeService {
 		const sandboxes = [
 			['daytona', daytonaName],
 			['n8n-sandbox', n8nSandboxId],
+			['substrate', n8nSandboxId],
 		] as const;
 
 		for (const [provider, sandboxId] of sandboxes) {
@@ -321,9 +323,11 @@ export class AgentSandboxRuntimeService {
 	): Promise<void> {
 		try {
 			const config =
-				provider === 'daytona'
-					? await this.resolveDaytonaSandboxConfig(projectId, sandboxId, labels)
-					: await this.resolveN8nSandboxConfig(sandboxId);
+				provider === 'substrate'
+					? { ...this.sandboxSettingsService.getSubstrateConfig(), id: sandboxId }
+					: provider === 'daytona'
+						? await this.resolveDaytonaSandboxConfig(projectId, sandboxId, labels)
+						: await this.resolveN8nSandboxConfig(sandboxId);
 			const sandbox = await createSandbox(config, { logger: this.logger });
 			// deleteRemote deletes by sandbox identity even though this instance never
 			// started it; destroy() is scoped to remotes the instance acquired.
@@ -356,14 +360,16 @@ export class AgentSandboxRuntimeService {
 		await getAgentOrThrow(this.agentRepository, agentId, projectId);
 
 		const config =
-			provider === 'daytona'
-				? await this.resolveDaytonaSandboxConfig(projectId, daytonaName, labels, lifecycle)
-				: await this.resolveN8nSandboxConfig(n8nSandboxId, lifecycle);
+			provider === 'substrate'
+				? { ...this.sandboxSettingsService.getSubstrateConfig(), id: n8nSandboxId }
+				: provider === 'daytona'
+					? await this.resolveDaytonaSandboxConfig(projectId, daytonaName, labels, lifecycle)
+					: await this.resolveN8nSandboxConfig(n8nSandboxId, lifecycle);
 		return await this.startSandbox(config, projectId, agentId, cacheKey, startOptions);
 	}
 
 	private async startSandbox(
-		config: DaytonaSandboxConfig | N8nSandboxConfig,
+		config: DaytonaSandboxConfig | N8nSandboxConfig | SubstrateSandboxConfig,
 		projectId: string,
 		agentId: string,
 		cacheKey: string,

@@ -1,0 +1,51 @@
+# Substrate sandbox
+
+The `substrate` provider uses the Substrate v0.4 control API to manage Actors.
+It sends commands and file requests through `atenet-router`.
+Each sandbox uses an Actor in the configured Atespace and ActorTemplate.
+
+## Configure n8n
+
+Set these server environment variables:
+
+| Variable | Value |
+| --- | --- |
+| `SUBSTRATE_API_ENDPOINT` | gRPC host and port, without a URL scheme |
+| `SUBSTRATE_ROUTER_URL` | Private HTTP or HTTPS router URL |
+| `SUBSTRATE_ATESPACE` | Atespace name |
+| `SUBSTRATE_ACTOR_TEMPLATE` | Template name in that Atespace |
+| `SUBSTRATE_TOKEN_FILE` | Path to a mounted bearer token file |
+| `SUBSTRATE_CA_FILE` | Path to the control API CA bundle |
+| `SUBSTRATE_SERVER_NAME` | TLS server name; defaults to `api.ate-system.svc` |
+
+Mount the token and CA files read-only. The n8n user must be able to read them.
+Use a token whose audience and issuer match the control API configuration.
+Rotate the token before it expires. The client reads it for each control API call.
+Keep the router private. Grant the control identity access only to its Atespace.
+
+Leave `N8N_INSTANCE_AI_SANDBOX_PROVIDER` unset to select **Agent Substrate** in
+**Agents → Add a code sandbox**. The dialog verifies a workspace and saves the
+provider selection. It does not send the server token or CA to the browser.
+
+For server-managed configuration, set
+`N8N_INSTANCE_AI_SANDBOX_PROVIDER=substrate` and
+`N8N_INSTANCE_AI_SANDBOX_ENABLED=true`. The UI then shows a server-managed
+connection instead of the provider choices.
+
+## Settings API
+
+The sandbox provider enum also accepts `substrate` in the settings and
+verification APIs. A sandbox verification request uses
+`{"provider":"substrate"}` without a connection payload. An admin settings
+update selects it with `{"sandboxProvider":"substrate","sandboxEnabled":true}`.
+The server reads the connection from its environment in both cases.
+
+## Lifecycle
+
+`stop()` suspends the Actor. A router request can wake it and restore its state.
+`destroy()` deletes it. Verification workspaces are deleted after the probe.
+Substrate does not implement the Daytona idle timers in n8n. Use an external idle
+controller to suspend inactive Actors.
+
+The ActorTemplate must run the sandbox daemon on port 80 and prepare
+`/home/user/workspace`. Commands run under the daemon's configured user.

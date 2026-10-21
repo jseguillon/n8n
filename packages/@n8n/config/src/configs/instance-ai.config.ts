@@ -83,6 +83,27 @@ export class InstanceAiConfig {
 	@Env('N8N_INSTANCE_AI_SANDBOX_PROVIDER')
 	sandboxProvider: string = 'n8n-sandbox';
 
+	@Env('SUBSTRATE_API_ENDPOINT')
+	substrateEndpoint: string = '';
+
+	@Env('SUBSTRATE_ROUTER_URL')
+	substrateRouterUrl: string = '';
+
+	@Env('SUBSTRATE_ATESPACE')
+	substrateAtespace: string = '';
+
+	@Env('SUBSTRATE_ACTOR_TEMPLATE')
+	substrateTemplate: string = '';
+
+	@Env('SUBSTRATE_TOKEN_FILE')
+	substrateTokenFile: string = '';
+
+	@Env('SUBSTRATE_CA_FILE')
+	substrateCaFile: string = '';
+
+	@Env('SUBSTRATE_SERVER_NAME')
+	substrateServerName: string = 'api.ate-system.svc';
+
 	/** Daytona API URL (e.g. "http://localhost:3000/api"). */
 	@Env('DAYTONA_API_URL')
 	daytonaApiUrl: string = '';

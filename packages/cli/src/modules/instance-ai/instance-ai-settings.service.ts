@@ -57,6 +57,7 @@ import { withModelName } from './model-config-name';
 import {
 	N8N_SANDBOX_SERVICE_URL_REQUIRED_MESSAGE,
 	normalizeSandboxProvider,
+	substrateSandboxConfig,
 } from './sandbox-provider';
 
 const ADMIN_SETTINGS_KEY = 'instanceAi.settings';
@@ -1566,7 +1567,20 @@ export class InstanceAiSettingsService {
 			return N8N_SANDBOX_SERVICE_URL_REQUIRED_MESSAGE;
 		}
 
+		if (sandboxEnabled && sandboxProvider === 'substrate') {
+			return this.getSubstrateUnavailableReason();
+		}
+
 		return null;
+	}
+
+	private getSubstrateUnavailableReason(): string | null {
+		try {
+			substrateSandboxConfig(this.config);
+			return null;
+		} catch (error) {
+			return ensureError(error).message;
+		}
 	}
 
 	private envVarModelConfig(): ModelConfig {
@@ -1598,6 +1612,10 @@ export class InstanceAiSettingsService {
 	private hasEnvironmentSandboxConnection(): boolean {
 		if (this.environmentSandboxProvider === 'daytona') {
 			return this.aiService.isProxyEnabled() || Boolean(this.config.daytonaApiKey.trim());
+		}
+		if (this.environmentSandboxProvider === 'substrate') {
+			// Substrate needs no stored credential; the env connection is complete when all its files and endpoints are set.
+			return this.getSubstrateUnavailableReason() === null;
 		}
 		// n8n Sandbox accepts keyless clients, so the service URL completes the connection.
 		return Boolean(this.environmentN8nSandboxServiceUrl.trim());

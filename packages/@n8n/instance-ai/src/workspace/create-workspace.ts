@@ -6,6 +6,7 @@ import {
 	type DaytonaSandboxConfig,
 	type DisabledSandboxConfig,
 	type N8nSandboxConfig,
+	type SubstrateSandboxConfig,
 	type SandboxConfig as SharedSandboxConfig,
 	type SandboxInstance,
 	type SandboxProvider,
@@ -25,7 +26,8 @@ export type InstanceAiDaytonaSandboxConfig = DaytonaSandboxConfig & {
 export type InstanceAiSandboxConfig =
 	| DisabledSandboxConfig
 	| InstanceAiDaytonaSandboxConfig
-	| N8nSandboxConfig;
+	| N8nSandboxConfig
+	| SubstrateSandboxConfig;
 
 export type SandboxConfig = InstanceAiSandboxConfig;
 export { type SandboxInstance, type SandboxProvider };

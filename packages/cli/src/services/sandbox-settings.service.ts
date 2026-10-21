@@ -14,6 +14,7 @@ import {
 	type ResolvedInstanceCredential,
 } from '@/credentials/instance-credential-broker';
 import { UnprocessableRequestError } from '@n8n/errors';
+import { substrateSandboxConfig } from '@/modules/instance-ai/sandbox-provider';
 
 const N8N_SANDBOX_HEADER_NAME = 'x-api-key';
 
@@ -106,6 +107,10 @@ export class SandboxSettingsService {
 
 	getProvider(): InstanceAiSandboxProvider {
 		return normalizeRuntimeSandboxProvider(this.config.sandboxProvider);
+	}
+
+	getSubstrateConfig() {
+		return substrateSandboxConfig(this.config);
 	}
 
 	registerCredentialUses(): void {

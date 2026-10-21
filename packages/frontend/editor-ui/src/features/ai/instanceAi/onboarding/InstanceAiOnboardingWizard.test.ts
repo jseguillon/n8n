@@ -357,6 +357,22 @@ describe('InstanceAiOnboardingWizard', () => {
 		await waitFor(() => expect(emitted().advance).toEqual([[]]), { timeout: 2500 });
 	});
 
+	it('verifies and saves Substrate without sending a credential', async () => {
+		const { pinia, store } = setupStore();
+		vi.mocked(store.verifySandbox).mockResolvedValue({ ok: true });
+		const { findByTestId, getByTestId } = renderWizard({
+			pinia,
+			props: { step: 'sandbox', surface: 'settings' },
+		});
+		await fireEvent.click(await findByTestId('assistant-sandbox-substrate'));
+		await fireEvent.click(getByTestId('n8n-agent-sandbox-dialog-save'));
+		await waitFor(() => expect(store.save).toHaveBeenCalledWith(false));
+		expect(store.verifySandbox).toHaveBeenCalledWith({ provider: 'substrate' });
+		expect(store.setField).toHaveBeenCalledWith('sandboxProvider', 'substrate');
+		expect(store.setField).toHaveBeenCalledWith('sandboxEnabled', true);
+		expect(store.setField).not.toHaveBeenCalledWith('sandboxConnection', expect.anything());
+	});
+
 	it('hydrates and verifies a saved Daytona connection', async () => {
 		const { pinia, store, credentialsStore } = setupStore({
 			sandboxProvider: 'daytona',

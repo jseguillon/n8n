@@ -299,6 +299,8 @@ catalog:
   rate-limit-redis: 4.3.1
   ioredis-mock: ^8.8.1
   '@types/ioredis-mock': 8.2.2
+  '@grpc/grpc-js': ^1.14.6
+  protobufjs: ^8.8.1
 
 catalogMode: strict
 
