@@ -110,9 +110,11 @@ describe('Substrate sandbox daemon protocol', () => {
 		vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
 		const encoder = new TextEncoder();
 		const stdout = vi.fn();
+		const stderr = vi.fn();
 		const events = [
 			{ type: 'started', exec_id: 'exec-1' },
 			{ type: 'stdout', data: 'ok' },
+			{ type: 'stderr', data: 'warning' },
 			{
 				type: 'exit',
 				exit_code: 0,
@@ -141,11 +143,11 @@ describe('Substrate sandbox daemon protocol', () => {
 			.mockResolvedValueOnce(new Response('{"type":"stdout","data":"partial"}\n'));
 		vi.stubGlobal('fetch', fetch);
 		const sandbox = new SubstrateSandbox(connection);
-		expect(await sandbox.executeCommand('printf', ['ok'], { onStdout: stdout })).toMatchObject({
-			stdout: 'ok',
-			exitCode: 0,
-		});
+		expect(
+			await sandbox.executeCommand('printf', ['ok'], { onStdout: stdout, onStderr: stderr }),
+		).toMatchObject({ stdout: 'ok', stderr: 'warning', exitCode: 0 });
 		expect(stdout).toHaveBeenCalledWith('ok');
+		expect(stderr).toHaveBeenCalledWith('warning');
 		await expect(sandbox.executeCommand('printf', ['partial'])).rejects.toThrow(
 			'without an exit event',
 		);
