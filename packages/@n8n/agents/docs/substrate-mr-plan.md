@@ -25,9 +25,9 @@ or nested-container behavior as Sysbox, or describe it as a hardware VM.
 | Feature | Current evidence | MR requirement |
 | --- | --- | --- |
 | Provider selection and persistence | Browser verification passed; selection survived reload | Add backend persistence and provider-switch tests |
-| Commands and stdout/stderr | Live UID/GID 1000 execution passed; split-stream unit test passed | Test errors, deadlines, aborts, output limits, and reconnects |
+| Commands and stdout/stderr | Live command failure, timeout, router cancellation, and stdout/stderr callback tests passed; unit tests cover split, malformed, bounded, and error streams | Test reconnects |
 | Node and Python execution | Live commands passed: Node 24.21.0 and Python 3.11.2 | Publish and test the image toolchain contract |
-| File operations | Live read/write/append/list/stat/copy/move/delete passed | Test binary data, large files, concurrent access, and errors |
+| File operations | Live binary read/write/append/list/stat/copy/move/delete, overwrite conflict, and recursive copy passed | Test large files and concurrent access |
 | Suspend and restore | File persistence and router wake passed | Test process-memory continuity, worker loss, and durable snapshot completion |
 | Knowledge search | Source uses `rg`, `timeout`, shell pipelines; required basic tools exist | Run real upload, mirror, search, read, and permission tests |
 | Assistant workflow builder | Only basic workspace initialization/probe passed | Run `setupSandboxWorkspace`, TypeScript build, diagnostics, and workflow round-trip |
@@ -40,8 +40,8 @@ or nested-container behavior as Sysbox, or describe it as a hardware VM.
 | Agent scratch workspace and delegated sub-agents | Identity wiring exists; no full run verified | Test principal isolation and parent-workspace sharing across queued/resumed runs |
 | Triggers, schedules, model calls, workflow tools | No evidence these depend directly on Sysbox | Regression-test them; external n8n task runners are a separate subsystem |
 | Browser/computer use | Not verified; no browser capability promised by this adapter | Trace the relevant separate service integration before claiming support |
-| Idle and ephemeral cleanup | Substrate config drops lifecycle settings | Implement or reject unsupported settings; never silently ignore them |
-| Assistant cleanup after restart | `destroyUncachedSandbox` accepts only `n8n-sandbox` | Add Substrate deletion by stable thread identity |
+| Idle and ephemeral cleanup | Instance AI deletes ephemeral Actors at cache expiry; persistent Actors need an external idle controller | Provide a trusted persistent Actor idle controller |
+| Assistant cleanup after restart | Uncached cleanup supports `n8n-sandbox` and Substrate by stable thread identity | Test orphan reconciliation |
 
 Important: `setupSandboxWorkspace` writes package files and runs `npm install`.
 The verification endpoint only initializes a workspace and runs `printf`.

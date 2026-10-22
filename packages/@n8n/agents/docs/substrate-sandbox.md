@@ -53,12 +53,21 @@ ephemeral Actors at cache expiry. Agent knowledge sandboxes reject
 `N8N_AGENTS_AI_SANDBOX_EPHEMERAL=true` until an external cleanup controller is
 configured for their deterministic Actor identities.
 
-The ActorTemplate must run the sandbox daemon on port 80 and prepare
-`/home/user/workspace`. Commands run under the daemon's configured user.
+The ActorTemplate router target must match the daemon listen port and prepare
+`/home/user/workspace`. The primary template uses port 8081. The v0.4
+compatibility template uses port 80. Commands run under the daemon's configured
+user.
 
 ## Integration test
 
-The Substrate lifecycle test is disabled by default. Set
+The Substrate integration suite is disabled by default. Set
 `SUBSTRATE_INTEGRATION_TEST=1` and provide the `SUBSTRATE_*` connection
-variables to run it against a private test Atespace. The test creates and
-deletes an Actor. Do not run it against a shared production Atespace.
+variables to run it against a private test Atespace:
+
+```sh
+pnpm test:integration src/__tests__/integration/substrate-sandbox.integration.test.ts
+```
+
+The suite creates and deletes Actors. It verifies lifecycle wake and persistence,
+router filesystem operations, command results, timeout, and cancellation. Do not
+run it against a shared production Atespace.
