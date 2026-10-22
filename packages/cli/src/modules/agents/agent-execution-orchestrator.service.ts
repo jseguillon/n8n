@@ -1483,7 +1483,11 @@ export class AgentExecutionOrchestratorService {
 		return {
 			surface: previewChat ? 'preview' : undefined,
 			access: { accessScope: 'user', ownerId: user.id },
-			sandboxPrincipalHash: hashAgentSandboxPrincipal({ type: 'n8n-user', userId: user.id }),
+			sandboxPrincipalHash: hashAgentSandboxPrincipal({
+				type: 'project-session',
+				projectId,
+				sessionId: threadId,
+			}),
 			alwaysSandboxed: false,
 			runtime: {
 				usePublishedVersion: false,
@@ -1546,7 +1550,11 @@ export class AgentExecutionOrchestratorService {
 		return {
 			surface: 'n8n-chat',
 			access: { accessScope: 'user', ownerId: userId },
-			sandboxPrincipalHash: hashAgentSandboxPrincipal({ type: 'n8n-user', userId }),
+			sandboxPrincipalHash: hashAgentSandboxPrincipal({
+				type: 'project-session',
+				projectId,
+				sessionId: threadId,
+			}),
 			alwaysSandboxed: true,
 			source: N8N_CHAT_PRODUCTION_SOURCE,
 			runtime: {

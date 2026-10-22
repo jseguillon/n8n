@@ -45,6 +45,8 @@ The server reads the connection from its environment in both cases.
 `stop()` suspends persistent Actors. It deletes ephemeral Actors. A router request
 can wake a suspended Actor and restore its state. `destroy()` deletes it.
 Verification workspaces are deleted after the probe.
+Agent chat workspaces are scoped to an n8n conversation thread. A later message
+in the same thread reuses its Actor; a different thread receives a different Actor.
 Substrate does not implement the Daytona idle timers in n8n. Use an external idle
 controller to suspend inactive persistent Actors. Instance AI deletes its own
 ephemeral Actors at cache expiry. Agent knowledge sandboxes reject
