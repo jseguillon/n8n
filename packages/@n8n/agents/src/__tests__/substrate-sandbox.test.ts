@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { SandboxServiceError } from '@n8n/sandbox-client';
 
 import { SubstrateControl } from '../workspace/sandbox/substrate-control';
 import { SubstrateSandbox } from '../workspace/sandbox/substrate-sandbox';
@@ -85,6 +86,23 @@ describe('Substrate sandbox daemon protocol', () => {
 
 		expect(new Headers(fetch.mock.calls[0][1].headers).get('ate-target-actor')).toBe(
 			`test-space/${sandbox.id}`,
+		);
+	});
+
+	it('reports router errors without following redirects', async () => {
+		const fetch = vi.fn().mockResolvedValue(new Response('unavailable', { status: 503 }));
+		vi.stubGlobal('fetch', fetch);
+		const sandbox = new SubstrateSandbox(connection);
+
+		await expect(sandbox.readFile(sandbox.id, '/home/user/check.txt')).rejects.toEqual(
+			expect.objectContaining({
+				constructor: SandboxServiceError,
+				status: 503,
+			}),
+		);
+		expect(fetch).toHaveBeenCalledWith(
+			expect.any(URL),
+			expect.objectContaining({ redirect: 'error' }),
 		);
 	});
 
@@ -176,5 +194,39 @@ describe('Substrate sandbox daemon protocol', () => {
 
 		expect(fetch.mock.calls[2][0].pathname).toBe('/executions/exec-1');
 		expect(fetch.mock.calls[2][1]).toMatchObject({ method: 'DELETE' });
+	});
+
+	it('reports daemon execution errors and cancels the execution', async () => {
+		vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
+		const fetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response('ok'))
+			.mockResolvedValueOnce(
+				new Response('{"type":"started","exec_id":"exec-1"}\n{"type":"error","error":"failed"}\n'),
+			)
+			.mockResolvedValueOnce(new Response('ok'));
+		vi.stubGlobal('fetch', fetch);
+		const sandbox = new SubstrateSandbox(connection);
+
+		await expect(sandbox.executeCommand('false')).rejects.toThrow('failed');
+
+		expect(fetch.mock.calls[2][0].pathname).toBe('/executions/exec-1');
+	});
+
+	it('rejects cumulative execution output above 10 MiB', async () => {
+		vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
+		const data = 'x'.repeat(1024 * 1024 - 100);
+		const events = Array.from({ length: 11 }, () => JSON.stringify({ type: 'stdout', data })).join(
+			'\n',
+		);
+		const fetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response('ok'))
+			.mockResolvedValueOnce(new Response(`{"type":"started","exec_id":"exec-1"}\n${events}\n`))
+			.mockResolvedValueOnce(new Response('ok'));
+		vi.stubGlobal('fetch', fetch);
+		const sandbox = new SubstrateSandbox(connection);
+
+		await expect(sandbox.executeCommand('yes')).rejects.toThrow('output exceeded the 10 MiB limit');
 	});
 });
