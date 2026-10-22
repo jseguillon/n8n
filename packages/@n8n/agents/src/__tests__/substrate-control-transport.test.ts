@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { parse } from 'protobufjs';
 
 const {
 	metadataEntries,
@@ -37,8 +38,17 @@ const {
 			options: { deadline: number },
 			done: (error: Error | null, value?: unknown) => void,
 		) {
-			makeUnaryRequest({ path, serialize, deserialize, request, metadata, options, done });
-			done(null);
+			const result = makeUnaryRequest({
+				path,
+				serialize,
+				deserialize,
+				request,
+				metadata,
+				options,
+				done,
+			});
+			if (result instanceof Error) done(result);
+			else done(null, result === undefined ? undefined : deserialize(result));
 		}
 
 		close() {
@@ -119,9 +129,7 @@ describe('SubstrateControl transport', () => {
 		readFile.mockImplementation(async (path: string) =>
 			path.endsWith('ca.crt') ? Buffer.from('ca') : 'token',
 		);
-		makeUnaryRequest.mockImplementationOnce((call: { done: (error: Error) => void }) => {
-			call.done(new Error('control unavailable'));
-		});
+		makeUnaryRequest.mockReturnValueOnce(new Error('control unavailable'));
 		const control = new SubstrateControl(connection, 1_000);
 
 		await expect(control.call('SuspendActor', 'n8n-workspace')).rejects.toThrow(
@@ -129,5 +137,47 @@ describe('SubstrateControl transport', () => {
 		);
 
 		expect(clientClose).toHaveBeenCalledOnce();
+	});
+
+	it('serializes Actor creation and decodes GetActor responses', async () => {
+		const protocol = parse(`syntax = "proto3";
+message ObjectRef { string atespace = 1; string name = 2; }
+message Actor { ObjectRef metadata = 1; ObjectRef actor_template = 4; }
+message CreateActorRequest { Actor actor = 1; }
+`).root;
+		const actor = protocol.lookupType('Actor');
+		readFile.mockImplementation(async (path: string) =>
+			path.endsWith('ca.crt') ? Buffer.from('ca') : 'token',
+		);
+		makeUnaryRequest.mockReturnValueOnce(undefined).mockReturnValueOnce(
+			Buffer.from(
+				actor
+					.encode(
+						actor.fromObject({
+							metadata: { atespace: 'test-space', name: 'n8n-workspace' },
+							actorTemplate: { atespace: 'test-space', name: 'test-template' },
+						}),
+					)
+					.finish(),
+			),
+		);
+		const control = new SubstrateControl(connection, 1_000);
+
+		await control.call('CreateActor', 'n8n-workspace');
+		const create = makeUnaryRequest.mock.calls[0][0];
+		const createRequest = protocol
+			.lookupType('CreateActorRequest')
+			.decode(create.serialize(create.request));
+		expect(protocol.lookupType('CreateActorRequest').toObject(createRequest)).toMatchObject({
+			actor: {
+				metadata: { atespace: 'test-space', name: 'n8n-workspace' },
+				actorTemplate: { atespace: 'test-space', name: 'test-template' },
+			},
+		});
+
+		await expect(control.call('GetActor', 'n8n-workspace')).resolves.toMatchObject({
+			metadata: { atespace: 'test-space', name: 'n8n-workspace' },
+			actorTemplate: { atespace: 'test-space', name: 'test-template' },
+		});
 	});
 });

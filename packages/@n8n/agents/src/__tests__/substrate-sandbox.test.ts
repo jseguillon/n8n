@@ -109,6 +109,7 @@ describe('Substrate sandbox daemon protocol', () => {
 	it('reads split execution events and rejects incomplete streams', async () => {
 		vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
 		const encoder = new TextEncoder();
+		const stdout = vi.fn();
 		const events = [
 			{ type: 'started', exec_id: 'exec-1' },
 			{ type: 'stdout', data: 'ok' },
@@ -140,13 +141,30 @@ describe('Substrate sandbox daemon protocol', () => {
 			.mockResolvedValueOnce(new Response('{"type":"stdout","data":"partial"}\n'));
 		vi.stubGlobal('fetch', fetch);
 		const sandbox = new SubstrateSandbox(connection);
-		expect(await sandbox.executeCommand('printf', ['ok'])).toMatchObject({
+		expect(await sandbox.executeCommand('printf', ['ok'], { onStdout: stdout })).toMatchObject({
 			stdout: 'ok',
 			exitCode: 0,
 		});
+		expect(stdout).toHaveBeenCalledWith('ok');
 		await expect(sandbox.executeCommand('printf', ['partial'])).rejects.toThrow(
 			'without an exit event',
 		);
+	});
+
+	it('rejects malformed execution events after cancelling a started execution', async () => {
+		vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
+		const fetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response('ok'))
+			.mockResolvedValueOnce(new Response('{"type":"started","exec_id":"exec-1"}\nnot-json\n'))
+			.mockResolvedValueOnce(new Response('ok'));
+		vi.stubGlobal('fetch', fetch);
+		const sandbox = new SubstrateSandbox(connection);
+
+		await expect(sandbox.executeCommand('false')).rejects.toThrow();
+
+		expect(fetch.mock.calls[2][0].pathname).toBe('/executions/exec-1');
+		expect(fetch.mock.calls[2][1]).toMatchObject({ method: 'DELETE' });
 	});
 
 	it('rejects oversized execution events before parsing them', async () => {

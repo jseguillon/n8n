@@ -91,6 +91,36 @@ describe.skipIf(!enabled)('Substrate sandbox integration', () => {
 		});
 	}, 120_000);
 
+	it('enforces filesystem overwrite rules and recursively copies directories', async () => {
+		await withSandbox(async (sandbox, root) => {
+			const source = `${root}/source`;
+			const copy = `${root}/copy`;
+			const moved = `${root}/moved`;
+			const file = `${source}/nested/file.txt`;
+
+			await sandbox.writeFile(sandbox.id, file, 'source');
+			await expect(sandbox.writeFile(sandbox.id, file, 'other', false)).rejects.toMatchObject({
+				status: 409,
+			});
+			await sandbox.copyFile(sandbox.id, {
+				src: source,
+				dest: copy,
+				recursive: true,
+				overwrite: false,
+			});
+			expect((await sandbox.readFile(sandbox.id, `${copy}/nested/file.txt`)).toString()).toBe(
+				'source',
+			);
+			await sandbox.moveFile(sandbox.id, { src: copy, dest: moved, overwrite: false });
+			expect((await sandbox.readFile(sandbox.id, `${moved}/nested/file.txt`)).toString()).toBe(
+				'source',
+			);
+			await expect(sandbox.readFile(sandbox.id, `${copy}/nested/file.txt`)).rejects.toMatchObject({
+				status: 404,
+			});
+		});
+	}, 120_000);
+
 	it('returns command exit state, environment, working directory, and timeout', async () => {
 		await withSandbox(async (sandbox, root) => {
 			await sandbox.mkdir(sandbox.id, root, true);
