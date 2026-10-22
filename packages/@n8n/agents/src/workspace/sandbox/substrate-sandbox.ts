@@ -108,10 +108,12 @@ export class SubstrateSandbox extends BaseSandbox {
 	): Promise<Response> {
 		const url = new URL(this.options.routerUrl.replace(/\/$/, '') + path);
 		url.search = new URLSearchParams(query).toString();
+		const headers = new Headers(init.headers);
+		headers.set('ate-target-actor', `${this.options.atespace}/${this.id}`);
 		const response = await fetch(url, {
 			...init,
 			redirect: 'error',
-			headers: { 'ate-target-actor': `${this.options.atespace}/${this.id}`, ...init.headers },
+			headers,
 			signal: init.signal ?? AbortSignal.timeout(this.timeout),
 		});
 		if (!response.ok) {

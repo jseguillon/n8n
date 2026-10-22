@@ -56,7 +56,9 @@ describe('Substrate sandbox daemon protocol', () => {
 			modifiedAt: '2026-10-20T01:00:00Z',
 		});
 		expect(fetch.mock.calls[0][0].searchParams.get('path')).toBe('/home/user');
-		expect(fetch.mock.calls[0][1].headers['ate-target-actor']).toBe(`test-space/${sandbox.id}`);
+		expect(new Headers(fetch.mock.calls[0][1].headers).get('ate-target-actor')).toBe(
+			`test-space/${sandbox.id}`,
+		);
 	});
 
 	it('forwards file operation cancellation to the router', async () => {
@@ -68,6 +70,22 @@ describe('Substrate sandbox daemon protocol', () => {
 		await sandbox.readFile(sandbox.id, '/home/user/check.txt', signal);
 
 		expect(fetch).toHaveBeenCalledWith(expect.any(URL), expect.objectContaining({ signal }));
+	});
+
+	it('does not allow request headers to override the target Actor', async () => {
+		const fetch = vi.fn().mockResolvedValue(new Response('ok'));
+		vi.stubGlobal('fetch', fetch);
+		const sandbox = new SubstrateSandbox(connection);
+
+		await (
+			sandbox as unknown as {
+				request: (path: string, init: RequestInit) => Promise<Response>;
+			}
+		).request('/healthz', { headers: { 'ate-target-actor': 'other-space/other-actor' } });
+
+		expect(new Headers(fetch.mock.calls[0][1].headers).get('ate-target-actor')).toBe(
+			`test-space/${sandbox.id}`,
+		);
 	});
 
 	it('reads split execution events and rejects incomplete streams', async () => {
@@ -127,5 +145,36 @@ describe('Substrate sandbox daemon protocol', () => {
 		await expect(sandbox.executeCommand('printf', ['too-large'])).rejects.toThrow(
 			'event exceeded the 1 MiB limit',
 		);
+	});
+
+	it('cancels a started execution when its stream fails', async () => {
+		vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
+		const encoder = new TextEncoder();
+		let started = false;
+		const fetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response('ok'))
+			.mockResolvedValueOnce(
+				new Response(
+					new ReadableStream({
+						pull(controller) {
+							if (!started) {
+								started = true;
+								controller.enqueue(encoder.encode('{"type":"started","exec_id":"exec-1"}\n'));
+								return;
+							}
+							controller.error(new Error('stream failed'));
+						},
+					}),
+				),
+			)
+			.mockResolvedValueOnce(new Response('ok'));
+		vi.stubGlobal('fetch', fetch);
+		const sandbox = new SubstrateSandbox(connection);
+
+		await expect(sandbox.executeCommand('sleep', ['10'])).rejects.toThrow('stream failed');
+
+		expect(fetch.mock.calls[2][0].pathname).toBe('/executions/exec-1');
+		expect(fetch.mock.calls[2][1]).toMatchObject({ method: 'DELETE' });
 	});
 });
