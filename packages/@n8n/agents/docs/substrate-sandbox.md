@@ -55,3 +55,10 @@ configured for their deterministic Actor identities.
 
 The ActorTemplate must run the sandbox daemon on port 80 and prepare
 `/home/user/workspace`. Commands run under the daemon's configured user.
+
+## Integration test
+
+The Substrate lifecycle test is disabled by default. Set
+`SUBSTRATE_INTEGRATION_TEST=1` and provide the `SUBSTRATE_*` connection
+variables to run it against a private test Atespace. The test creates and
+deletes an Actor. Do not run it against a shared production Atespace.
