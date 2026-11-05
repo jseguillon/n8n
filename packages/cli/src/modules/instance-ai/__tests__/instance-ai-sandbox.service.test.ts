@@ -911,6 +911,40 @@ describe('InstanceAiSandboxService', () => {
 	});
 
 	describe('expiry timers', () => {
+		it('stops an idle ephemeral Substrate Actor before evicting its cache entry', async () => {
+			vi.useFakeTimers();
+			try {
+				const { service } = createSandboxService({
+					config: {
+						sandboxEnabled: true,
+						sandboxProvider: 'substrate',
+						sandboxEphemeral: true,
+						builderSandboxTtlMs: 1000,
+						substrateEndpoint: 'api.ate-system.svc:443',
+						substrateRouterUrl: 'https://router.example',
+						substrateAtespace: 'n8n',
+						substrateTemplate: 'sandbox',
+						substrateTokenFile: '/run/secrets/token',
+						substrateCaFile: '/run/secrets/ca.crt',
+						substrateServerName: 'api.ate-system.svc',
+					},
+				});
+				const sandbox = { id: 'sandbox-1', provider: 'substrate', _stop: vi.fn(async () => {}) };
+				const workspace = { init: vi.fn(async () => {}), destroy: vi.fn(async () => {}) };
+				(createSandbox as Mock).mockResolvedValue(sandbox);
+				(createWorkspace as Mock).mockReturnValue(workspace);
+				(setupSandboxWorkspace as Mock).mockResolvedValue(undefined);
+
+				await service.getOrCreateWorkspace('thread-1', fakeUser, {} as InstanceAiContext);
+				await vi.advanceTimersByTimeAsync(1000);
+
+				expect(sandbox._stop).toHaveBeenCalledTimes(1);
+				expect(workspace.destroy).not.toHaveBeenCalled();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
 		it('evicts expired runtime sandbox entries without destroying the provider workspace', async () => {
 			vi.useFakeTimers();
 			try {
@@ -1107,6 +1141,38 @@ describe('InstanceAiSandboxService', () => {
 			expect(createSandbox).toHaveBeenCalledWith(
 				expect.objectContaining({
 					provider: 'n8n-sandbox',
+					id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+				}),
+				expect.any(Object),
+			);
+			expect(sandbox.destroy).toHaveBeenCalledTimes(1);
+			expect(withSandboxLifecycleTrace).toHaveBeenCalledTimes(1);
+		});
+
+		it('deletes the uncached remote Actor for the Substrate provider', async () => {
+			// No prior getOrCreateWorkspace call: simulates a thread deleted after
+			// a restart or idle eviction, when the in-process cache has no entry.
+			const { service } = createSandboxService({
+				config: {
+					sandboxEnabled: true,
+					sandboxProvider: 'substrate',
+					substrateEndpoint: 'api.ate-system.svc:443',
+					substrateRouterUrl: 'https://router.example',
+					substrateAtespace: 'n8n',
+					substrateTemplate: 'sandbox',
+					substrateTokenFile: '/run/secrets/token',
+					substrateCaFile: '/run/secrets/ca.crt',
+					substrateServerName: 'api.ate-system.svc',
+				},
+			});
+			const sandbox = { destroy: vi.fn(async () => {}) };
+			(createSandbox as Mock).mockResolvedValue(sandbox);
+
+			await service.destroySandbox('thread-1');
+
+			expect(createSandbox).toHaveBeenCalledWith(
+				expect.objectContaining({
+					provider: 'substrate',
 					id: expect.stringMatching(/^[0-9a-f-]{36}$/),
 				}),
 				expect.any(Object),

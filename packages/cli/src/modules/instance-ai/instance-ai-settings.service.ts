@@ -48,6 +48,7 @@ import { AiService } from '@/services/ai.service';
 import {
 	INSTANCE_AI_DAYTONA_CREDENTIAL_POLICY,
 	INSTANCE_AI_N8N_SANDBOX_CREDENTIAL_POLICY,
+	INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY,
 	SandboxSettingsService,
 } from '@/services/sandbox-settings.service';
 
@@ -57,6 +58,7 @@ import { withModelName } from './model-config-name';
 import {
 	N8N_SANDBOX_SERVICE_URL_REQUIRED_MESSAGE,
 	normalizeSandboxProvider,
+	substrateSandboxConfig,
 } from './sandbox-provider';
 
 const ADMIN_SETTINGS_KEY = 'instanceAi.settings';
@@ -219,6 +221,8 @@ function validateInstanceAiCredential(
 		INSTANCE_AI_DAYTONA_CREDENTIAL_POLICY.validate?.(credential);
 	} else if (policy === INSTANCE_AI_N8N_SANDBOX_CREDENTIAL_POLICY) {
 		INSTANCE_AI_N8N_SANDBOX_CREDENTIAL_POLICY.validate?.(credential);
+	} else if (policy === INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY) {
+		INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY.validate?.(credential);
 	} else if (policy === INSTANCE_AI_SEARCH_CREDENTIAL_POLICY) {
 		validateSearchCredential(credential);
 	} else {
@@ -269,6 +273,7 @@ export interface AdminModelSelection {
 export interface AdminCredentialSelection extends AdminModelSelection {
 	daytonaCredentialId: string | null;
 	n8nSandboxCredentialId: string | null;
+	substrateCredentialId?: string | null;
 	searchCredentialId: string | null;
 }
 
@@ -378,19 +383,26 @@ export class InstanceAiSettingsService {
 			});
 		}
 
-		const [modelSelection, daytonaCredentialId, n8nSandboxCredentialId, searchCredentialId] =
-			await Promise.all([
-				this.readAdminModelSelection(),
-				this.instanceCredentialBroker.getAssignedCredentialId(
-					INSTANCE_AI_DAYTONA_CREDENTIAL_POLICY,
-				),
-				this.instanceCredentialBroker.getAssignedCredentialId(
-					INSTANCE_AI_N8N_SANDBOX_CREDENTIAL_POLICY,
-				),
-				this.instanceCredentialBroker.getAssignedCredentialId(INSTANCE_AI_SEARCH_CREDENTIAL_POLICY),
-			]);
+		const [
+			modelSelection,
+			daytonaCredentialId,
+			n8nSandboxCredentialId,
+			searchCredentialId,
+			substrateCredentialId,
+		] = await Promise.all([
+			this.readAdminModelSelection(),
+			this.instanceCredentialBroker.getAssignedCredentialId(INSTANCE_AI_DAYTONA_CREDENTIAL_POLICY),
+			this.instanceCredentialBroker.getAssignedCredentialId(
+				INSTANCE_AI_N8N_SANDBOX_CREDENTIAL_POLICY,
+			),
+			this.instanceCredentialBroker.getAssignedCredentialId(INSTANCE_AI_SEARCH_CREDENTIAL_POLICY),
+			this.instanceCredentialBroker.getAssignedCredentialId(
+				INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY,
+			),
+		]);
 		return this.buildAdminSettingsResponse({
 			...modelSelection,
+			substrateCredentialId,
 			daytonaCredentialId,
 			n8nSandboxCredentialId,
 			searchCredentialId,
@@ -430,6 +442,10 @@ export class InstanceAiSettingsService {
 			mcpAccessEnabled: this.mcpAccessEnabled,
 			sandboxEnabled: c.sandboxEnabled,
 			sandboxProvider,
+			substrateCredentialId:
+				isManaged || sandboxEnvConfigured
+					? null
+					: (credentialSelection.substrateCredentialId ?? null),
 			daytonaCredentialId:
 				isManaged || (directEnvironmentConfig && sandboxEnvConfigured)
 					? null
@@ -462,6 +478,8 @@ export class InstanceAiSettingsService {
 					model: Boolean(process.env.N8N_INSTANCE_AI_MODEL?.trim()),
 				},
 				sandbox: {
+					substrateToken:
+						typeof c.substrateTokenFile === 'string' && Boolean(c.substrateTokenFile.trim()),
 					provider: Boolean(process.env.N8N_INSTANCE_AI_SANDBOX_PROVIDER?.trim()),
 					serviceUrl: Boolean(this.environmentN8nSandboxServiceUrl.trim()),
 					apiKey:
@@ -520,14 +538,20 @@ export class InstanceAiSettingsService {
 			if (update.daytonaCredentialId !== null) {
 				this.rejectManagedFields(update, ['daytonaCredentialId'], this.deploymentLabel());
 			}
-			if (update.sandboxConnection?.type === 'daytonaApi') {
+			if (
+				update.sandboxConnection?.type === 'daytonaApi' ||
+				update.sandboxConnection?.type === 'substrateApi'
+			) {
 				this.rejectManagedFields(update, ['sandboxConnection'], this.deploymentLabel());
 			}
+			if (update.substrateCredentialId !== null)
+				this.rejectManagedFields(update, ['substrateCredentialId'], this.deploymentLabel());
 		}
 		const {
 			modelCredentialId: initialModelCredentialId,
 			daytonaCredentialId: initialDaytonaCredentialId,
 			n8nSandboxCredentialId: initialN8nSandboxCredentialId,
+			substrateCredentialId: initialSubstrateCredentialId,
 			searchCredentialId: initialSearchCredentialId,
 			modelConnection,
 			sandboxConnection,
@@ -537,6 +561,7 @@ export class InstanceAiSettingsService {
 		let modelCredentialId = initialModelCredentialId;
 		let daytonaCredentialId = initialDaytonaCredentialId;
 		let n8nSandboxCredentialId = initialN8nSandboxCredentialId;
+		let substrateCredentialId = initialSubstrateCredentialId;
 		let searchCredentialId = initialSearchCredentialId;
 		if (settingsUpdate.searchDisabled === true) {
 			if (searchConnection) {
@@ -594,7 +619,9 @@ export class InstanceAiSettingsService {
 					? 'daytona'
 					: sandboxConnection?.type === 'httpHeaderAuth'
 						? 'n8n-sandbox'
-						: settingsUpdate.sandboxProvider,
+						: sandboxConnection?.type === 'substrateApi'
+							? 'substrate'
+							: settingsUpdate.sandboxProvider,
 		);
 		await this.runConnectionHooks([modelPrepared, searchPrepared, sandboxPrepared]);
 		const { previous, next, credentialSelection, previousSelection } =
@@ -628,6 +655,7 @@ export class InstanceAiSettingsService {
 					);
 					daytonaCredentialId = sandbox.daytonaCredentialId;
 					n8nSandboxCredentialId = sandbox.n8nSandboxCredentialId;
+					substrateCredentialId = sandbox.substrateCredentialId;
 					if (sandbox.sandboxProvider) settingsUpdate.sandboxProvider = sandbox.sandboxProvider;
 				}
 
@@ -652,6 +680,7 @@ export class InstanceAiSettingsService {
 					currentDaytonaCredentialId,
 					currentN8nCredentialId,
 					currentSearchCredentialId,
+					currentSubstrateCredentialId,
 				] = await Promise.all([
 					this.instanceCredentialBroker.getAssignedCredentialId(
 						INSTANCE_AI_MODEL_CREDENTIAL_POLICY,
@@ -669,6 +698,10 @@ export class InstanceAiSettingsService {
 						INSTANCE_AI_SEARCH_CREDENTIAL_POLICY,
 						ctx,
 					),
+					this.instanceCredentialBroker.getAssignedCredentialId(
+						INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY,
+						ctx,
+					),
 				]);
 				const nextDaytonaCredentialId =
 					daytonaCredentialId === undefined ? currentDaytonaCredentialId : daytonaCredentialId;
@@ -676,17 +709,26 @@ export class InstanceAiSettingsService {
 					n8nSandboxCredentialId === undefined ? currentN8nCredentialId : n8nSandboxCredentialId;
 				const nextSearchCredentialId =
 					searchCredentialId === undefined ? currentSearchCredentialId : searchCredentialId;
+				const nextSubstrateCredentialId =
+					substrateCredentialId === undefined
+						? currentSubstrateCredentialId
+						: substrateCredentialId;
 				const clearsSandboxConnection =
 					(sandboxConnection !== undefined ||
 						daytonaCredentialId !== undefined ||
-						n8nSandboxCredentialId !== undefined) &&
+						n8nSandboxCredentialId !== undefined ||
+						substrateCredentialId !== undefined) &&
 					nextDaytonaCredentialId === null &&
-					nextN8nCredentialId === null;
+					nextN8nCredentialId === null &&
+					!nextSubstrateCredentialId;
 				const assignsSandboxConnection =
 					(sandboxConnection !== undefined ||
 						daytonaCredentialId !== undefined ||
-						n8nSandboxCredentialId !== undefined) &&
-					(nextDaytonaCredentialId !== null || nextN8nCredentialId !== null);
+						n8nSandboxCredentialId !== undefined ||
+						substrateCredentialId !== undefined) &&
+					(nextDaytonaCredentialId !== null ||
+						nextN8nCredentialId !== null ||
+						Boolean(nextSubstrateCredentialId));
 				if (assignsSandboxConnection) settingsUpdate.sandboxEnabled = true;
 				this.validateAdminSettingsUpdate(
 					settingsUpdate,
@@ -732,6 +774,15 @@ export class InstanceAiSettingsService {
 					n8nSandboxCredentialId,
 				);
 				await updateCredentialAssignment(INSTANCE_AI_SEARCH_CREDENTIAL_POLICY, searchCredentialId);
+				await updateCredentialAssignment(
+					INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY,
+					substrateCredentialId,
+				);
+				if (typeof substrateCredentialId === 'string')
+					await this.validateAssignedServiceCredential(
+						INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY,
+						ctx,
+					);
 				if (typeof modelCredentialId === 'string') {
 					await this.validateAssignedServiceCredential(INSTANCE_AI_MODEL_CREDENTIAL_POLICY, ctx);
 				}
@@ -762,6 +813,7 @@ export class InstanceAiSettingsService {
 						daytonaCredentialId: nextDaytonaCredentialId,
 						n8nSandboxCredentialId: nextN8nCredentialId,
 						searchCredentialId: nextSearchCredentialId,
+						substrateCredentialId: nextSubstrateCredentialId ?? null,
 					} satisfies AdminCredentialSelection,
 					previousSelection: {
 						modelCredentialId: currentModelCredentialId,
@@ -769,6 +821,7 @@ export class InstanceAiSettingsService {
 						daytonaCredentialId: currentDaytonaCredentialId,
 						n8nSandboxCredentialId: currentN8nCredentialId,
 						searchCredentialId: currentSearchCredentialId,
+						substrateCredentialId: currentSubstrateCredentialId ?? null,
 					} satisfies AdminCredentialSelection,
 				};
 			});
@@ -792,6 +845,7 @@ export class InstanceAiSettingsService {
 			['modelConnection', 'modelCredentialId', update.modelCredentialId !== undefined],
 			['sandboxConnection', 'daytonaCredentialId', update.daytonaCredentialId !== undefined],
 			['sandboxConnection', 'n8nSandboxCredentialId', update.n8nSandboxCredentialId !== undefined],
+			['sandboxConnection', 'substrateCredentialId', update.substrateCredentialId !== undefined],
 			['searchConnection', 'searchCredentialId', update.searchCredentialId !== undefined],
 		];
 		for (const [connectionField, idField, idPresent] of conflicts) {
@@ -922,7 +976,9 @@ export class InstanceAiSettingsService {
 				? INSTANCE_AI_DAYTONA_CREDENTIAL_POLICY
 				: connection.type === 'httpHeaderAuth'
 					? INSTANCE_AI_N8N_SANDBOX_CREDENTIAL_POLICY
-					: undefined;
+					: connection.type === 'substrateApi'
+						? INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY
+						: undefined;
 		if (!policy) {
 			throw new UnprocessableRequestError(
 				`Connection type "${connection.type}" is not supported for the sandbox`,
@@ -953,11 +1009,29 @@ export class InstanceAiSettingsService {
 	): Promise<{
 		daytonaCredentialId: string | null;
 		n8nSandboxCredentialId: string | null;
+		substrateCredentialId: string | null;
 		sandboxProvider?: InstanceAiSandboxProvider;
 	}> {
 		const name = 'n8n Assistant sandbox';
+		const substrateCredentialId = await this.upsertConnection(
+			user,
+			INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY,
+			name,
+			connection?.type === 'substrateApi' ? connection : null,
+			ctx,
+			prepared,
+		);
+		if (connection?.type === 'substrateApi') {
+			return {
+				substrateCredentialId,
+				daytonaCredentialId: null,
+				n8nSandboxCredentialId: null,
+				sandboxProvider: 'substrate',
+			};
+		}
 		if (connection === null) {
 			return {
+				substrateCredentialId,
 				daytonaCredentialId: await this.upsertConnection(
 					user,
 					INSTANCE_AI_DAYTONA_CREDENTIAL_POLICY,
@@ -976,6 +1050,7 @@ export class InstanceAiSettingsService {
 		}
 		if (connection.type === 'daytonaApi') {
 			return {
+				substrateCredentialId,
 				daytonaCredentialId: await this.upsertConnection(
 					user,
 					INSTANCE_AI_DAYTONA_CREDENTIAL_POLICY,
@@ -996,6 +1071,7 @@ export class InstanceAiSettingsService {
 		}
 		if (connection.type === 'httpHeaderAuth') {
 			return {
+				substrateCredentialId,
 				n8nSandboxCredentialId: await this.upsertConnection(
 					user,
 					INSTANCE_AI_N8N_SANDBOX_CREDENTIAL_POLICY,
@@ -1074,6 +1150,34 @@ export class InstanceAiSettingsService {
 		return this.connectionForVerification(prepared);
 	}
 
+	async resolveSubstrateConfig(
+		connection?: InstanceAiConnectionUpdate,
+		credentialId?: string,
+		user?: User,
+	) {
+		if (credentialId) {
+			if (connection || !user)
+				throw new UnprocessableRequestError('Choose one Substrate credential connection');
+			const available = await this.instanceCredentialBroker.listForUse(
+				INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY,
+			);
+			if (!available.some(({ id }) => id === credentialId))
+				throw new ForbiddenError('Substrate credential is not available');
+			const credential = await this.credentialsFinderService.findCredentialForUser(
+				credentialId,
+				user,
+				['credential:read'],
+			);
+			if (!credential || credential.type !== 'substrateApi')
+				throw new ForbiddenError('Substrate credential is not available');
+			connection = {
+				type: credential.type,
+				data: await this.credentialsService.decrypt(credential, true),
+			};
+		}
+		return await this.sandboxSettingsService.getSubstrateConfig(connection);
+	}
+
 	async resolveSearchConnectionForVerification(
 		connection: InstanceAiConnectionUpdate,
 	): Promise<InstanceAiConnectionUpdate> {
@@ -1114,6 +1218,7 @@ export class InstanceAiSettingsService {
 			: [
 					INSTANCE_AI_DAYTONA_CREDENTIAL_POLICY,
 					INSTANCE_AI_N8N_SANDBOX_CREDENTIAL_POLICY,
+					INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY,
 					INSTANCE_AI_SEARCH_CREDENTIAL_POLICY,
 				];
 		const credentials = await Promise.all(
@@ -1285,19 +1390,26 @@ export class InstanceAiSettingsService {
 
 	/** Setup state of a direct self-managed instance, from the shared derivation. */
 	private async resolveSetupState(): Promise<InstanceAiSetupState> {
-		const [modelSelection, daytonaCredentialId, n8nSandboxCredentialId, searchCredentialId] =
-			await Promise.all([
-				this.readAdminModelSelection(),
-				this.instanceCredentialBroker.getAssignedCredentialId(
-					INSTANCE_AI_DAYTONA_CREDENTIAL_POLICY,
-				),
-				this.instanceCredentialBroker.getAssignedCredentialId(
-					INSTANCE_AI_N8N_SANDBOX_CREDENTIAL_POLICY,
-				),
-				this.instanceCredentialBroker.getAssignedCredentialId(INSTANCE_AI_SEARCH_CREDENTIAL_POLICY),
-			]);
+		const [
+			modelSelection,
+			daytonaCredentialId,
+			n8nSandboxCredentialId,
+			searchCredentialId,
+			substrateCredentialId,
+		] = await Promise.all([
+			this.readAdminModelSelection(),
+			this.instanceCredentialBroker.getAssignedCredentialId(INSTANCE_AI_DAYTONA_CREDENTIAL_POLICY),
+			this.instanceCredentialBroker.getAssignedCredentialId(
+				INSTANCE_AI_N8N_SANDBOX_CREDENTIAL_POLICY,
+			),
+			this.instanceCredentialBroker.getAssignedCredentialId(INSTANCE_AI_SEARCH_CREDENTIAL_POLICY),
+			this.instanceCredentialBroker.getAssignedCredentialId(
+				INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY,
+			),
+		]);
 		const response = this.buildAdminSettingsResponse({
 			...modelSelection,
+			substrateCredentialId,
 			daytonaCredentialId,
 			n8nSandboxCredentialId,
 			searchCredentialId,
@@ -1469,6 +1581,7 @@ export class InstanceAiSettingsService {
 		'modelCredentialId',
 		'daytonaCredentialId',
 		'n8nSandboxCredentialId',
+		'substrateCredentialId',
 		'searchCredentialId',
 		'modelConnection',
 		'sandboxConnection',
@@ -1487,6 +1600,7 @@ export class InstanceAiSettingsService {
 				'sandboxProvider',
 				'daytonaCredentialId',
 				'n8nSandboxCredentialId',
+				'substrateCredentialId',
 				'sandboxConnection',
 				'n8nSandboxServiceUrl',
 			);
@@ -1531,6 +1645,7 @@ export class InstanceAiSettingsService {
 			update.sandboxTimeout !== undefined ||
 			update.daytonaCredentialId !== undefined ||
 			update.n8nSandboxCredentialId !== undefined ||
+			update.substrateCredentialId !== undefined ||
 			update.sandboxConnection !== undefined;
 		if (!touchesSandboxSettings) return;
 
@@ -1567,7 +1682,20 @@ export class InstanceAiSettingsService {
 			return N8N_SANDBOX_SERVICE_URL_REQUIRED_MESSAGE;
 		}
 
+		if (sandboxEnabled && sandboxProvider === 'substrate') {
+			return this.hasEnvironmentSandboxConnection() ? this.getSubstrateUnavailableReason() : null;
+		}
+
 		return null;
+	}
+
+	private getSubstrateUnavailableReason(): string | null {
+		try {
+			substrateSandboxConfig(this.config);
+			return null;
+		} catch (error) {
+			return ensureError(error).message;
+		}
 	}
 
 	private envVarModelConfig(): ModelConfig {
@@ -1599,6 +1727,10 @@ export class InstanceAiSettingsService {
 	private hasEnvironmentSandboxConnection(): boolean {
 		if (this.environmentSandboxProvider === 'daytona') {
 			return this.aiService.isProxyEnabled() || Boolean(this.config.daytonaApiKey.trim());
+		}
+		if (this.environmentSandboxProvider === 'substrate') {
+			// Substrate needs no stored credential; the env connection is complete when all its files and endpoints are set.
+			return this.getSubstrateUnavailableReason() === null;
 		}
 		// n8n Sandbox accepts keyless clients, so the service URL completes the connection.
 		return Boolean(this.environmentN8nSandboxServiceUrl.trim());
@@ -1790,12 +1922,14 @@ export class InstanceAiSettingsService {
 				modelCredentialId?: string | null;
 				daytonaCredentialId?: string | null;
 				n8nSandboxCredentialId?: string | null;
+				substrateCredentialId?: string | null;
 				searchCredentialId?: string | null;
 			}
 		>(value, { fallbackValue: {} });
 		delete settings.modelCredentialId;
 		delete settings.daytonaCredentialId;
 		delete settings.n8nSandboxCredentialId;
+		delete settings.substrateCredentialId;
 		delete settings.searchCredentialId;
 		return settings;
 	}

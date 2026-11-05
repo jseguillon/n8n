@@ -6,6 +6,7 @@ import {
 	N8N_SANDBOX_SERVICE_URL_REQUIRED_MESSAGE,
 	normalizeSandboxProvider,
 	requireN8nSandboxServiceUrl,
+	substrateSandboxConfig,
 } from '../sandbox-provider';
 
 describe('sandbox-provider', () => {
@@ -39,6 +40,44 @@ describe('sandbox-provider', () => {
 			expect(() => requireN8nSandboxServiceUrl('   ')).toThrow(
 				N8N_SANDBOX_SERVICE_URL_REQUIRED_MESSAGE,
 			);
+		});
+	});
+
+	describe('substrateSandboxConfig', () => {
+		const config = {
+			substrateEndpoint: '127.0.0.1:18443',
+			substrateRouterUrl: 'https://router.example.com',
+			substrateAtespace: 'test-space',
+			substrateTemplate: 'test-template',
+			substrateTokenFile: '/run/substrate/token',
+			substrateCaFile: '/run/substrate/ca.crt',
+			substrateServerName: 'api.ate-system.svc',
+			sandboxTimeout: 60_000,
+			sandboxEphemeral: true,
+		};
+
+		it('returns the configured Substrate connection', () => {
+			expect(substrateSandboxConfig(config as never)).toEqual({
+				enabled: true,
+				provider: 'substrate',
+				connection: {
+					endpoint: '127.0.0.1:18443',
+					routerUrl: 'https://router.example.com',
+					atespace: 'test-space',
+					template: 'test-template',
+					tokenFile: '/run/substrate/token',
+					caFile: '/run/substrate/ca.crt',
+					serverName: 'api.ate-system.svc',
+				},
+				timeout: 60_000,
+				ephemeral: true,
+			});
+		});
+
+		it.each(['', '   '])('rejects a missing required connection value %j', (value) => {
+			expect(() =>
+				substrateSandboxConfig({ ...config, substrateTokenFile: value } as never),
+			).toThrow(OperationalError);
 		});
 	});
 });

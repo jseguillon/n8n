@@ -25,7 +25,11 @@ import { v5 as uuidv5 } from 'uuid';
 import { N8N_VERSION } from '@/constants';
 import { callAiServiceWithRetry } from '@/utils/ai-service-retry';
 
-import { normalizeSandboxProvider, requireN8nSandboxServiceUrl } from '../sandbox-provider';
+import {
+	normalizeSandboxProvider,
+	requireN8nSandboxServiceUrl,
+	substrateSandboxConfig,
+} from '../sandbox-provider';
 
 const SANDBOX_NAME_MAX_LEN = 63;
 const SANDBOX_LABEL_MAX_LEN = 63;
@@ -42,8 +46,10 @@ export type RuntimeSandboxEntry = {
 	verifiedBundles: VerifiedWorkspaceBundles;
 	setupComplete: boolean;
 	setupPromise: Promise<void> | undefined;
+	ephemeral: boolean;
 	expiresAt: number;
 	cleanupTimer?: ReturnType<typeof setTimeout>;
+	idleStopPromise?: Promise<void>;
 };
 
 type SandboxCacheState = { fingerprint: string; config?: SandboxConfig };
@@ -118,7 +124,7 @@ function buildThreadScopedSandboxUuid(threadId: string): string {
 function withThreadScopedSandboxIdentity(config: SandboxConfig, threadId: string): SandboxConfig {
 	if (!config.enabled) return config;
 
-	if (config.provider === 'n8n-sandbox') {
+	if (config.provider === 'n8n-sandbox' || config.provider === 'substrate') {
 		return { ...config, id: buildThreadScopedSandboxUuid(threadId) };
 	}
 
@@ -147,6 +153,9 @@ export type InstanceAiSandboxBackgroundTasks = {
 
 /** Settings collaborator that resolves provider credentials from admin config. */
 export type InstanceAiSandboxSettings = {
+	resolveSubstrateConfig?: () => Promise<
+		Extract<SandboxConfig, { provider: 'substrate'; enabled: true }>
+	>;
 	resolveDaytonaConfig: () => Promise<{ apiUrl?: string; apiKey?: string }>;
 	resolveN8nSandboxConfig: () => Promise<{ serviceUrl?: string; apiKey?: string }>;
 };
@@ -244,6 +253,7 @@ export class InstanceAiSandboxService {
 			};
 		}
 
+		if (provider === 'substrate') return substrateSandboxConfig(this.instanceAiConfig);
 		if (provider === 'daytona') {
 			return {
 				enabled: true,
@@ -276,8 +286,16 @@ export class InstanceAiSandboxService {
 	}
 
 	async resolveSandboxConfig(user: User): Promise<SandboxConfig> {
+		if (
+			this.instanceAiConfig.sandboxEnabled &&
+			normalizeSandboxProvider(this.instanceAiConfig.sandboxProvider) === 'substrate' &&
+			this.options.settingsService.resolveSubstrateConfig
+		) {
+			return await this.options.settingsService.resolveSubstrateConfig();
+		}
 		const base = this.getSandboxConfigFromEnv();
 		if (!base.enabled) return base;
+		if (base.provider === 'substrate') return base;
 		if (base.provider === 'daytona') {
 			// If AI assistant service is available, route Daytona calls through its sandbox proxy
 			if (this.options.aiService.isProxyEnabled()) {
@@ -361,15 +379,10 @@ export class InstanceAiSandboxService {
 				}
 				const existing = this.sandboxes.get(threadId);
 				if (existing) {
-					if (
-						existing.configFingerprint !== cacheState.fingerprint ||
-						(this.isSandboxEntryExpired(existing) && !this.isSandboxInUse(threadId))
-					) {
-						this.evictSandboxEntry(
-							threadId,
-							existing,
-							existing.configFingerprint !== cacheState.fingerprint ? 'config_changed' : 'idle',
-						);
+					if (existing.configFingerprint !== cacheState.fingerprint) {
+						this.evictSandboxEntry(threadId, existing, 'config_changed');
+					} else if (this.isSandboxEntryExpired(existing) && !this.isSandboxInUse(threadId)) {
+						await this.evictIdleSandboxEntry(threadId, existing);
 					} else {
 						this.touchSandboxEntry(threadId, existing);
 						outcome = 'cached';
@@ -502,6 +515,7 @@ export class InstanceAiSandboxService {
 			verifiedBundles: new Map(),
 			setupComplete: false,
 			setupPromise: undefined,
+			ephemeral: config.ephemeral === true,
 			expiresAt: this.nextSandboxExpiry(),
 		};
 		return entry;
@@ -591,10 +605,9 @@ export class InstanceAiSandboxService {
 
 	/**
 	 * Delete the remote sandbox for a thread with no cache entry (after a
-	 * restart or an idle eviction). Only the n8n-sandbox provider supports
-	 * this: its id is recomputable from the thread id, and a delete for an id
-	 * that never existed is a cheap 404. Daytona is left to its own
-	 * auto-stop/auto-delete lifecycle.
+	 * restart or an idle eviction). The n8n-sandbox and Substrate providers use
+	 * thread-derived ids, so deleting a missing remote is safe. Daytona is left
+	 * to its own auto-stop/auto-delete lifecycle.
 	 */
 	private async destroyUncachedSandbox(
 		threadId: string,
@@ -602,26 +615,35 @@ export class InstanceAiSandboxService {
 		userId?: string,
 	): Promise<void> {
 		try {
-			if (
-				!this.instanceAiConfig.sandboxEnabled ||
-				normalizeSandboxProvider(this.instanceAiConfig.sandboxProvider) !== 'n8n-sandbox'
-			)
-				return;
+			if (!this.instanceAiConfig.sandboxEnabled) return;
+			const provider = normalizeSandboxProvider(this.instanceAiConfig.sandboxProvider);
+			if (provider !== 'n8n-sandbox' && provider !== 'substrate') return;
 
 			await withSandboxLifecycleTrace(
 				threadId,
 				'destroy',
 				{ reason, cached: false },
 				async () => {
-					const base = this.getSandboxConfigFromEnv();
-					if (!base.enabled || base.provider !== 'n8n-sandbox') return;
+					const base =
+						provider === 'substrate' && this.options.settingsService.resolveSubstrateConfig
+							? await this.options.settingsService.resolveSubstrateConfig()
+							: this.getSandboxConfigFromEnv();
+					if (!base.enabled || (base.provider !== 'n8n-sandbox' && base.provider !== 'substrate'))
+						return;
 
-					const settings = await this.options.settingsService.resolveN8nSandboxConfig();
+					const settings =
+						base.provider === 'n8n-sandbox'
+							? await this.options.settingsService.resolveN8nSandboxConfig()
+							: undefined;
 					const config = withThreadScopedSandboxIdentity(
 						{
 							...base,
-							serviceUrl: settings.serviceUrl ?? base.serviceUrl,
-							apiKey: settings.apiKey ?? base.apiKey,
+							...(base.provider === 'n8n-sandbox'
+								? {
+										serviceUrl: settings?.serviceUrl ?? base.serviceUrl,
+										apiKey: settings?.apiKey ?? base.apiKey,
+									}
+								: {}),
 						},
 						threadId,
 					);
@@ -684,10 +706,8 @@ export class InstanceAiSandboxService {
 		if (this.sandboxTtlMs <= 0) return;
 		if (entry.cleanupTimer) clearTimeout(entry.cleanupTimer);
 
-		// The provider reclaims the remote sandbox (Daytona auto-stop, sandbox-service
-		// idle reaping), and the deterministic identity lets a later request reattach
-		// while it is still alive. This timer only drops our in-process cache entry
-		// so the map cannot grow indefinitely.
+		// Most providers reclaim remote sandboxes. Substrate has no native idle reaper,
+		// so an ephemeral Actor is stopped here and its adapter deletes it.
 		const delay = Math.max(0, entry.expiresAt - Date.now());
 		entry.cleanupTimer = setTimeout(() => {
 			const current = this.sandboxes.get(threadId);
@@ -696,9 +716,46 @@ export class InstanceAiSandboxService {
 				this.touchSandboxEntry(threadId, entry);
 				return;
 			}
-			this.evictSandboxEntry(threadId, entry, 'idle', true);
+			void this.evictIdleSandboxEntry(threadId, entry, true);
 		}, delay);
 		entry.cleanupTimer.unref();
+	}
+
+	private async evictIdleSandboxEntry(
+		threadId: string,
+		entry: RuntimeSandboxEntry,
+		detached = false,
+	): Promise<void> {
+		if (this.sandboxes.get(threadId) !== entry) return;
+		if (entry.idleStopPromise) {
+			await entry.idleStopPromise;
+			return;
+		}
+
+		const stop = entry.sandbox._stop?.bind(entry.sandbox);
+		if (!entry.ephemeral || entry.sandbox.provider !== 'substrate' || !stop) {
+			this.evictSandboxEntry(threadId, entry, 'idle', detached);
+			return;
+		}
+
+		entry.idleStopPromise = withSandboxLifecycleTrace(
+			threadId,
+			'stop',
+			{ reason: 'idle', sandboxId: entry.sandbox.id, provider: entry.sandbox.provider },
+			async () => await stop(),
+			{ resolveConfig: this.lifecycleTraceConfig(threadId, entry.userId), detached },
+		);
+		try {
+			await entry.idleStopPromise;
+		} catch (error) {
+			this.logger.warn('Failed to stop idle ephemeral sandbox', {
+				threadId,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		} finally {
+			entry.idleStopPromise = undefined;
+			this.evictSandboxEntry(threadId, entry, 'idle', detached);
+		}
 	}
 
 	stopSandboxExpiryTimers(): void {
