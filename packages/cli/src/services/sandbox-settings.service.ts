@@ -1,7 +1,8 @@
-import type { InstanceAiSandboxProvider } from '@n8n/api-types';
+import type { InstanceAiConnectionUpdate, InstanceAiSandboxProvider } from '@n8n/api-types';
 import {
 	normalizeSandboxProvider as normalizeRuntimeSandboxProvider,
 	type DaytonaSandboxConfig,
+	type SubstrateSandboxConfig,
 } from '@n8n/agents/sandbox';
 import { Logger } from '@n8n/backend-common';
 import { GlobalConfig } from '@n8n/config';
@@ -18,6 +19,7 @@ import {
 	type ResolvedInstanceCredential,
 } from '@/credentials/instance-credential-broker';
 import { UnprocessableRequestError, OperationalError } from '@n8n/errors';
+import { substrateSandboxConfig } from '@/modules/instance-ai/sandbox-provider';
 
 import { AiService } from './ai.service';
 import { callAiServiceWithRetry } from '@/utils/ai-service-retry';
@@ -26,12 +28,12 @@ const N8N_SANDBOX_HEADER_NAME = 'x-api-key';
 
 type SandboxCredential = {
 	type: string;
-	data: ICredentialDataDecryptedObject;
+	data: Record<string, unknown>;
 };
 
 function requireConnectionValue(
 	type: string,
-	data: ICredentialDataDecryptedObject,
+	data: Record<string, unknown>,
 	field: string,
 ): string {
 	const value = data[field];
@@ -43,7 +45,7 @@ function requireConnectionValue(
 	return value.trim();
 }
 
-function requireHttpUrl(type: string, data: ICredentialDataDecryptedObject, field: string): string {
+function requireHttpUrl(type: string, data: Record<string, unknown>, field: string): string {
 	const value = requireConnectionValue(type, data, field);
 	try {
 		const url = new URL(value);
@@ -86,6 +88,54 @@ export const INSTANCE_AI_N8N_SANDBOX_CREDENTIAL_POLICY: InstanceCredentialUse = 
 	validate: parseSandboxServiceCredential,
 };
 
+/** Connection fields belong to the instance credential; TLS and token files stay server-owned. */
+export function parseSubstrateCredential({ type, data }: SandboxCredential) {
+	if (['tokenFile', 'caFile', 'serverName'].some((field) => field in data)) {
+		throw new UnprocessableRequestError(
+			'Substrate TLS trust and token files are managed on the server',
+		);
+	}
+	if (data.apiToken !== undefined && typeof data.apiToken !== 'string') {
+		throw new UnprocessableRequestError('The Substrate access token must be a string');
+	}
+	const endpoint = requireConnectionValue(type, data, 'endpoint');
+	const match = /^(?:\[[a-fA-F0-9:]+\]|[a-zA-Z0-9.-]+):(\d+)$/.exec(endpoint);
+	if (!match || Number(match[1]) < 1 || Number(match[1]) > 65535) {
+		throw new UnprocessableRequestError(
+			'The Substrate control endpoint must be a host:port without a URL scheme',
+		);
+	}
+	const routerUrl = requireHttpUrl(type, data, 'routerUrl');
+	const router = new URL(routerUrl);
+	if (router.username || router.password || router.search || router.hash) {
+		throw new UnprocessableRequestError(
+			'The Substrate router URL must not contain credentials, a query, or a fragment',
+		);
+	}
+	const atespace = requireConnectionValue(type, data, 'atespace');
+	const template = requireConnectionValue(type, data, 'template');
+	for (const value of [atespace, template]) {
+		if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)) {
+			throw new UnprocessableRequestError(
+				'Substrate Atespace and ActorTemplate must be DNS labels',
+			);
+		}
+	}
+	return {
+		endpoint,
+		routerUrl,
+		atespace,
+		template,
+		token: typeof data.apiToken === 'string' ? data.apiToken.trim() : '',
+	};
+}
+
+export const INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY: InstanceCredentialUse = {
+	id: 'instance-ai:sandbox:substrate',
+	credentialTypes: ['substrateApi'],
+	validate: parseSubstrateCredential,
+};
+
 @Service()
 export class SandboxSettingsService {
 	private readonly config: InstanceAiConfig;
@@ -93,6 +143,8 @@ export class SandboxSettingsService {
 	private readonly agentsConfig: AgentsConfig;
 
 	private readonly deploymentConfig: DeploymentConfig;
+
+	private readonly environmentSandboxProvider: InstanceAiSandboxProvider;
 
 	private credentialUsesRegistered = false;
 
@@ -106,6 +158,7 @@ export class SandboxSettingsService {
 		this.agentsConfig = globalConfig.agents;
 		this.deploymentConfig = globalConfig.deployment;
 		this.config.sandboxProvider = this.getProvider();
+		this.environmentSandboxProvider = this.getProvider();
 	}
 
 	isAgentSandboxEnabled(): boolean {
@@ -116,10 +169,54 @@ export class SandboxSettingsService {
 		return normalizeRuntimeSandboxProvider(this.config.sandboxProvider);
 	}
 
+	async getSubstrateConfig(
+		connection?: InstanceAiConnectionUpdate,
+	): Promise<SubstrateSandboxConfig> {
+		if (connection && connection.type !== 'substrateApi')
+			throw new UnprocessableRequestError(
+				'The Substrate connection must use a substrateApi credential',
+			);
+		if (!connection && this.environmentSandboxProvider === 'substrate') {
+			try {
+				return substrateSandboxConfig(this.config);
+			} catch {
+				/* Partial server config can supply only TLS or a renewable token. */
+			}
+		}
+		const resolved =
+			connection ??
+			(await this.resolveServiceCredential(
+				INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY,
+				'Substrate sandbox',
+			));
+		if (!resolved) return substrateSandboxConfig(this.config);
+		const parsed = parseSubstrateCredential(resolved);
+		if (!this.config.substrateTokenFile && !parsed.token) {
+			throw new UnprocessableRequestError(
+				'A Substrate access token or server token file is required',
+			);
+		}
+		return {
+			enabled: true,
+			provider: 'substrate',
+			connection: {
+				...parsed,
+				tokenFile: this.config.substrateTokenFile || '',
+				caFile: this.config.substrateCaFile || '',
+				serverName:
+					process.env.SUBSTRATE_SERVER_NAME?.trim() ||
+					parsed.endpoint.replace(/:\d+$/, '').replace(/^\[|\]$/g, ''),
+			},
+			timeout: this.config.sandboxTimeout,
+			ephemeral: this.config.sandboxEphemeral,
+		};
+	}
+
 	registerCredentialUses(): void {
 		if (this.credentialUsesRegistered) return;
 		this.instanceCredentialBroker.registerUse(INSTANCE_AI_DAYTONA_CREDENTIAL_POLICY);
 		this.instanceCredentialBroker.registerUse(INSTANCE_AI_N8N_SANDBOX_CREDENTIAL_POLICY);
+		this.instanceCredentialBroker.registerUse(INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY);
 		this.credentialUsesRegistered = true;
 	}
 

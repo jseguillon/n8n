@@ -5,7 +5,10 @@ import { mock } from 'vitest-mock-extended';
 
 import type { InstanceCredentialBroker } from '@/credentials/instance-credential-broker';
 
-import { SandboxSettingsService } from '../sandbox-settings.service';
+import {
+	SandboxSettingsService,
+	INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY,
+} from '../sandbox-settings.service';
 import type { AiService } from '../ai.service';
 
 describe('SandboxSettingsService', () => {
@@ -55,6 +58,114 @@ describe('SandboxSettingsService', () => {
 			logger,
 			aiService,
 		);
+	});
+
+	describe('Substrate UI connection', () => {
+		const data = {
+			endpoint: 'api.example.test:443',
+			routerUrl: 'https://router.example.test',
+			atespace: 'sandboxes',
+			template: 'sandbox',
+			apiToken: 'fixture-token',
+		};
+		beforeEach(() => {
+			Object.assign(globalConfig.instanceAi, {
+				substrateTokenFile: '',
+				substrateCaFile: '',
+				substrateEndpoint: '',
+				substrateRouterUrl: '',
+				substrateAtespace: '',
+				substrateTemplate: '',
+				substrateServerName: '',
+				sandboxTimeout: 5_000,
+				sandboxEphemeral: false,
+			});
+			vi.stubEnv('SUBSTRATE_SERVER_NAME', '');
+		});
+		afterEach(() => vi.unstubAllEnvs());
+
+		it('resolves the assigned encrypted connection with system TLS trust', async () => {
+			instanceCredentialBroker.resolveForUse.mockResolvedValue({
+				id: 'substrate-credential',
+				name: 'Substrate',
+				type: 'substrateApi',
+				data,
+			});
+			await expect(service.getSubstrateConfig()).resolves.toMatchObject({
+				provider: 'substrate',
+				connection: {
+					endpoint: data.endpoint,
+					token: 'fixture-token',
+					tokenFile: '',
+					caFile: '',
+					serverName: 'api.example.test',
+				},
+			});
+			expect(instanceCredentialBroker.resolveForUse).toHaveBeenCalledWith(
+				INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY,
+			);
+		});
+
+		it('keeps renewable token and private TLS settings on the server', async () => {
+			Object.assign(globalConfig.instanceAi, {
+				substrateTokenFile: '/server/token',
+				substrateCaFile: '/server/ca',
+			});
+			vi.stubEnv('SUBSTRATE_SERVER_NAME', 'private-control.example.test');
+			await expect(
+				service.getSubstrateConfig({ type: 'substrateApi', data: { ...data, apiToken: '' } }),
+			).resolves.toMatchObject({
+				connection: {
+					tokenFile: '/server/token',
+					caFile: '/server/ca',
+					serverName: 'private-control.example.test',
+					token: '',
+				},
+			});
+		});
+
+		it('requires a token when no renewable server identity exists', async () => {
+			await expect(
+				service.getSubstrateConfig({ type: 'substrateApi', data: { ...data, apiToken: '' } }),
+			).rejects.toThrow('access token or server token file');
+		});
+
+		it.each([
+			{ endpoint: 'https://api.example.test' },
+			{ endpoint: 'api.example.test:70000' },
+			{ routerUrl: 'https://user:password@router.example.test' },
+			{ atespace: '../other-space' },
+			{ tokenFile: '/unexpected/file' },
+			{ caFile: '/unexpected/ca' },
+			{ serverName: 'unexpected.example.test' },
+		])('rejects invalid or server-only fields: %j', async (invalid) => {
+			await expect(
+				service.getSubstrateConfig({ type: 'substrateApi', data: { ...data, ...invalid } }),
+			).rejects.toThrow();
+		});
+
+		it('keeps a complete operator environment connection ahead of stored UI credentials', async () => {
+			Object.assign(globalConfig.instanceAi, {
+				sandboxProvider: 'substrate',
+				substrateEndpoint: data.endpoint,
+				substrateRouterUrl: data.routerUrl,
+				substrateAtespace: data.atespace,
+				substrateTemplate: data.template,
+				substrateTokenFile: '/server/token',
+				substrateCaFile: '/server/ca',
+				substrateServerName: 'api.example.test',
+			});
+			const managed = new SandboxSettingsService(
+				globalConfig as never,
+				instanceCredentialBroker,
+				logger,
+				aiService,
+			);
+			await expect(managed.getSubstrateConfig()).resolves.toMatchObject({
+				connection: { tokenFile: '/server/token' },
+			});
+			expect(instanceCredentialBroker.resolveForUse).not.toHaveBeenCalled();
+		});
 	});
 
 	it.each([

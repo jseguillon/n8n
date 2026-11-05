@@ -15,6 +15,30 @@ const unconfigured: InstanceAiSetupStateInput = {
 };
 
 describe('deriveInstanceAiSetupState', () => {
+	it('counts only the assigned Substrate credential for a UI connection', () => {
+		const state = deriveInstanceAiSetupState({
+			...unconfigured,
+			sandboxEnabled: true,
+			sandboxProvider: 'substrate',
+			n8nSandboxCredentialId: 'old-credential',
+			substrateCredentialId: 'substrate-credential',
+		});
+		expect(state.sandboxSource).toBe('ui');
+		expect(state.sandboxType).toBe('substrate');
+		expect(state.sandboxCredentialId).toBe('substrate-credential');
+	});
+
+	it('does not treat a provider selection alone as a configured Substrate connection', () => {
+		const state = deriveInstanceAiSetupState({
+			...unconfigured,
+			sandboxEnabled: true,
+			sandboxProvider: 'substrate',
+			n8nSandboxCredentialId: 'other',
+		});
+		expect(state.sandboxSource).toBe('none');
+		expect(state.sandboxCredentialId).toBeNull();
+	});
+
 	it('reports everything as unconfigured and setup incomplete by default', () => {
 		expect(deriveInstanceAiSetupState(unconfigured)).toEqual({
 			modelSource: 'none',
