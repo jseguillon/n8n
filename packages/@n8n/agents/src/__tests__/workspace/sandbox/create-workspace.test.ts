@@ -7,6 +7,7 @@ import { N8nSandboxFilesystem } from '../../../workspace/filesystem/n8n-sandbox-
 import { createFilesystem, createSandbox } from '../../../workspace/sandbox/create-workspace';
 import { DaytonaSandbox } from '../../../workspace/sandbox/daytona-sandbox';
 import { N8nSandboxServiceSandbox } from '../../../workspace/sandbox/n8n-sandbox-sandbox';
+import { SubstrateSandbox } from '../../../workspace/sandbox/substrate-sandbox';
 import type { SandboxConfig } from '../../../workspace/sandbox/types';
 
 describe('createSandbox', () => {
@@ -167,6 +168,31 @@ describe('createSandbox', () => {
 		);
 	});
 
+	it('returns a SubstrateSandbox for substrate provider', async () => {
+		const config: SandboxConfig = {
+			enabled: true,
+			provider: 'substrate',
+			id: 'workspace-1',
+			timeout: 45_000,
+			ephemeral: true,
+			connection: {
+				endpoint: '127.0.0.1:18443',
+				routerUrl: 'https://router.example.com',
+				atespace: 'test-space',
+				template: 'test-template',
+				tokenFile: '/run/substrate/token',
+				caFile: '/run/substrate/ca.crt',
+				serverName: 'api.ate-system.svc',
+			},
+		};
+
+		const result = await createSandbox(config);
+
+		expect(result).toBeInstanceOf(SubstrateSandbox);
+		expect(result?.id).toBe('n8n-workspace-1');
+		expect(result?.provider).toBe('substrate');
+	});
+
 	it('omits ephemeral from the N8nSandboxServiceSandbox when not configured', async () => {
 		const config: SandboxConfig = {
 			enabled: true,
@@ -231,5 +257,22 @@ describe('createFilesystem', () => {
 
 		expect(result).toBeInstanceOf(N8nSandboxFilesystem);
 		expect(result.provider).toBe('n8n-sandbox');
+	});
+
+	it('creates an N8nSandboxFilesystem for SubstrateSandbox', () => {
+		const sandbox = new SubstrateSandbox({
+			endpoint: '127.0.0.1:18443',
+			routerUrl: 'https://router.example.com',
+			atespace: 'test-space',
+			template: 'test-template',
+			tokenFile: '/run/substrate/token',
+			caFile: '/run/substrate/ca.crt',
+			serverName: 'api.ate-system.svc',
+		});
+
+		const result = createFilesystem(sandbox);
+
+		expect(result).toBeInstanceOf(N8nSandboxFilesystem);
+		expect(result.provider).toBe('substrate');
 	});
 });

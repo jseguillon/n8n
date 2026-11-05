@@ -35,6 +35,7 @@ export type {
 	CreateSandboxOptions,
 	DaytonaSandboxConfig,
 	N8nSandboxConfig,
+	SubstrateSandboxConfig,
 	DisabledSandboxConfig,
 	ExecuteCommandOptions,
 	FileContent,
