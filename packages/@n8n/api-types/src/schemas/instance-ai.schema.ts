@@ -2488,7 +2488,7 @@ export function resolveInstanceAiPermissions(
 // Admin settings — instance-scoped, admin-only
 // ---------------------------------------------------------------------------
 
-export const instanceAiSandboxProviderSchema = z.enum(['n8n-sandbox', 'daytona']);
+export const instanceAiSandboxProviderSchema = z.enum(['n8n-sandbox', 'daytona', 'substrate']);
 export type InstanceAiSandboxProvider = z.infer<typeof instanceAiSandboxProviderSchema>;
 
 export function isInstanceAiSandboxProvider(value: unknown): value is InstanceAiSandboxProvider {
@@ -2533,6 +2533,8 @@ export interface InstanceAiEnvManagedFields {
 		provider: boolean;
 		serviceUrl: boolean;
 		apiKey: boolean;
+		/** A renewable token is supplied by the operator. Never exposes its path or value. */
+		substrateToken?: boolean;
 	};
 	search: {
 		provider: boolean;
@@ -2549,6 +2551,7 @@ export interface InstanceAiAdminSettingsResponse {
 	sandboxProvider: InstanceAiSandboxProvider;
 	daytonaCredentialId: string | null;
 	n8nSandboxCredentialId: string | null;
+	substrateCredentialId?: string | null;
 	searchCredentialId: string | null;
 	modelCredentialId: string | null;
 	modelName: string | null;
@@ -2574,6 +2577,7 @@ export type InstanceAiSetupStateInput = Pick<
 	| 'sandboxProvider'
 	| 'daytonaCredentialId'
 	| 'n8nSandboxCredentialId'
+	| 'substrateCredentialId'
 	| 'searchCredentialId'
 	| 'searchEnvConfigured'
 	| 'searchDisabled'
@@ -2606,9 +2610,11 @@ export function deriveInstanceAiSetupState(
 			? 'ui'
 			: 'none';
 	const sandboxCredentialId =
-		settings.sandboxProvider === 'daytona'
-			? settings.daytonaCredentialId
-			: settings.n8nSandboxCredentialId;
+		settings.sandboxProvider === 'substrate'
+			? (settings.substrateCredentialId ?? null)
+			: settings.sandboxProvider === 'daytona'
+				? settings.daytonaCredentialId
+				: settings.n8nSandboxCredentialId;
 	const sandboxSource: InstanceAiComponentSource = !settings.sandboxEnabled
 		? 'none'
 		: settings.sandboxEnvConfigured
@@ -2661,6 +2667,7 @@ export class InstanceAiAdminSettingsUpdateRequest extends Z.class({
 	sandboxTimeout: z.number().int().positive().optional(),
 	daytonaCredentialId: z.string().nullable().optional(),
 	n8nSandboxCredentialId: z.string().nullable().optional(),
+	substrateCredentialId: z.string().nullable().optional(),
 	searchCredentialId: z.string().nullable().optional(),
 	modelCredentialId: z.string().nullable().optional(),
 	modelConnection: instanceAiConnectionSchema.nullable().optional(),
@@ -2692,6 +2699,7 @@ export class InstanceAiVerifyModelRequest extends Z.class({
 export class InstanceAiVerifySandboxRequest extends Z.class({
 	provider: instanceAiSandboxProviderSchema.optional(),
 	connection: instanceAiConnectionSchema.optional(),
+	credentialId: z.string().min(1).optional(),
 	serviceUrl: z.string().url().optional(),
 }) {}
 

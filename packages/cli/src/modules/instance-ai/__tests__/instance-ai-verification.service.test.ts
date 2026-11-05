@@ -236,6 +236,77 @@ describe('InstanceAiVerificationService', () => {
 			expect(workspace.destroy).toHaveBeenCalled();
 		});
 
+		it('verifies the Substrate filesystem daemon', async () => {
+			settingsService.resolveSubstrateConfig.mockResolvedValue({
+				enabled: true,
+				provider: 'substrate',
+				connection: {
+					endpoint: 'api.example.test:443',
+					routerUrl: 'https://router.example.test',
+					atespace: 'test-space',
+					template: 'test-template',
+					tokenFile: '/server/token',
+					caFile: '/server/ca',
+					serverName: 'api.example.test',
+				},
+			});
+			Object.assign(globalConfig.instanceAi, {
+				substrateEndpoint: 'https://substrate.example.test',
+				substrateRouterUrl: 'https://router.example.test',
+				substrateAtespace: 'test-space',
+				substrateTemplate: 'test-template',
+				substrateTokenFile: '/run/secrets/substrate-token',
+				substrateCaFile: '/run/secrets/substrate-ca',
+				substrateServerName: 'substrate.example.test',
+			});
+			const workspace = {
+				init: vi.fn().mockResolvedValue(undefined),
+				destroy: vi.fn().mockResolvedValue(undefined),
+				sandbox: { executeCommand: vi.fn().mockResolvedValue({ exitCode: 0 }) },
+				filesystem: {
+					writeFile: vi.fn().mockResolvedValue(undefined),
+					readFile: vi.fn().mockResolvedValue(Buffer.from('ok')),
+					deleteFile: vi.fn().mockResolvedValue(undefined),
+				},
+			};
+			createSandboxMock.mockResolvedValue({} as never);
+			createWorkspaceMock.mockReturnValue(workspace as never);
+
+			await expect(service.verifySandbox(user, { provider: 'substrate' })).resolves.toMatchObject({
+				ok: true,
+			});
+
+			expect(workspace.filesystem.writeFile).toHaveBeenCalledWith(
+				'/home/user/workspace/.n8n-substrate-verification',
+				'ok',
+				{ recursive: true },
+			);
+			expect(workspace.filesystem.readFile).toHaveBeenCalledWith(
+				'/home/user/workspace/.n8n-substrate-verification',
+			);
+			expect(workspace.filesystem.deleteFile).toHaveBeenCalledWith(
+				'/home/user/workspace/.n8n-substrate-verification',
+			);
+			expect(createSandboxMock).toHaveBeenCalledWith(
+				expect.objectContaining({ provider: 'substrate', ephemeral: true }),
+			);
+		});
+
+		it.each([
+			[16, 'unauthorized'],
+			[7, 'forbidden'],
+			[14, 'unreachable'],
+			[4, 'timeout'],
+		] as const)('classifies Substrate gRPC code %s as %s', async (code, failure) => {
+			settingsService.resolveSubstrateConfig.mockRejectedValue(
+				Object.assign(new Error('Substrate connection failed'), { code }),
+			);
+			await expect(service.verifySandbox(user, { provider: 'substrate' })).resolves.toMatchObject({
+				ok: false,
+				failure,
+			});
+		});
+
 		it('returns a timeout and starts cleanup when sandbox verification exceeds the deadline', async () => {
 			const timeoutError = Object.assign(new Error('Sandbox verification timed out'), {
 				name: 'TimeoutError',

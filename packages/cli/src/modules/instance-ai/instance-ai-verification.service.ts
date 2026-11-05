@@ -25,6 +25,12 @@ import { InstanceAiSettingsService } from './instance-ai-settings.service';
 const VERIFICATION_TIMEOUT_MS = 30_000;
 
 const MAX_ERROR_MESSAGE_LENGTH = 512;
+const SUBSTRATE_GRPC_FAILURES: Partial<Record<number, InstanceAiVerificationFailure>> = {
+	16: 'unauthorized',
+	7: 'forbidden',
+	14: 'unreachable',
+	4: 'timeout',
+};
 
 /**
  * The probe only needs the call to succeed, not its text, but OpenAI's
@@ -183,9 +189,31 @@ export class InstanceAiVerificationService {
 				abortSignal,
 			);
 			if (!result || result.exitCode !== 0) throw new Error('Sandbox command failed');
+			if (provider === 'substrate') {
+				const filesystem = activeWorkspace.filesystem;
+				if (!filesystem) throw new Error('Substrate sandbox filesystem did not start');
+				const markerPath = '/home/user/workspace/.n8n-substrate-verification';
+				try {
+					await raceWithAbort(
+						async () => await filesystem.writeFile(markerPath, 'ok', { recursive: true }),
+						abortSignal,
+					);
+					const marker = await raceWithAbort(
+						async () => await filesystem.readFile(markerPath),
+						abortSignal,
+					);
+					if (Buffer.from(marker).toString() !== 'ok') {
+						throw new Error('Substrate sandbox filesystem returned unexpected content');
+					}
+				} finally {
+					await raceWithAbort(async () => await filesystem.deleteFile(markerPath), abortSignal);
+				}
+			}
 			return { ok: true, startupMs };
 		} catch (error) {
-			const classifiedFailure = classifyFailure(error);
+			const grpcFailure =
+				provider === 'substrate' ? SUBSTRATE_GRPC_FAILURES[numericStatus(error) ?? 0] : undefined;
+			const classifiedFailure = grpcFailure ?? classifyFailure(error);
 			const failure =
 				provider === 'daytona' && classifiedFailure === 'forbidden'
 					? 'quota_exceeded'
@@ -266,7 +294,7 @@ export class InstanceAiVerificationService {
 	}
 
 	private async resolveSandboxConfig(
-		_user: User,
+		user: User,
 		request: InstanceAiVerifySandboxRequest,
 	): Promise<SandboxConfig> {
 		const instanceAi = this.globalConfig.instanceAi;
@@ -285,6 +313,17 @@ export class InstanceAiVerificationService {
 					connectionString(connection, 'apiKey') ?? saved?.apiKey ?? instanceAi.daytonaApiKey,
 				image: instanceAi.sandboxImage,
 				timeout: instanceAi.sandboxTimeout,
+				ephemeral: true,
+			};
+		}
+
+		if (provider === 'substrate') {
+			return {
+				...(await this.settingsService.resolveSubstrateConfig(
+					connection,
+					request.credentialId,
+					user,
+				)),
 				ephemeral: true,
 			};
 		}

@@ -82,6 +82,38 @@ describe('InstanceAiSettingsService', () => {
 			threadRepository,
 		);
 
+	it('keeps a complete Substrate environment locked and never returns token or TLS file paths', async () => {
+		Object.assign(globalConfig.instanceAi, {
+			sandboxProvider: 'substrate',
+			substrateEndpoint: 'api.example.test:443',
+			substrateRouterUrl: 'https://router.example.test',
+			substrateAtespace: 'sandboxes',
+			substrateTemplate: 'sandbox',
+			substrateTokenFile: '/server/token',
+			substrateCaFile: '/server/ca',
+			substrateServerName: 'api.example.test',
+		});
+		sandboxSettingsService.getProvider.mockReturnValue('substrate');
+		const managed = createService();
+		await expect(
+			managed.updateAdminSettings({ sandboxConnection: { type: 'substrateApi', data: {} } }),
+		).rejects.toThrow('environment-managed');
+		const result = await managed.getAdminSettings();
+		expect(result).toMatchObject({
+			sandboxEnvConfigured: true,
+			substrateCredentialId: null,
+			envManaged: { sandbox: { substrateToken: true } },
+		});
+		expect(JSON.stringify(result)).not.toContain('/server/');
+	});
+
+	it('rejects verification of an unavailable Substrate credential before decryption', async () => {
+		await expect(
+			service.resolveSubstrateConfig(undefined, 'unavailable', mock<User>()),
+		).rejects.toThrow('not available');
+		expect(credentialsService.decrypt).not.toHaveBeenCalled();
+	});
+
 	beforeEach(() => {
 		vi.resetAllMocks();
 		vi.stubEnv('N8N_INSTANCE_AI_MODEL', '');
@@ -110,6 +142,13 @@ describe('InstanceAiSettingsService', () => {
 			vertexLocation: '',
 			vertexServiceAccountJson: '',
 			enabled: undefined,
+			substrateEndpoint: '',
+			substrateRouterUrl: '',
+			substrateAtespace: '',
+			substrateTemplate: '',
+			substrateTokenFile: '',
+			substrateCaFile: '',
+			substrateServerName: '',
 		});
 		globalConfig.deployment.type = 'default';
 		license.isEnterprisePlan.mockReturnValue(false);
@@ -384,6 +423,60 @@ describe('InstanceAiSettingsService', () => {
 					'new-cred',
 					operationContext,
 				);
+			});
+
+			it('stores the Substrate connection through encrypted credentials and clears other provider assignments', async () => {
+				instanceCredentialBroker.resolveForUse.mockResolvedValue(null);
+				credentialsService.createInstanceCredential.mockResolvedValue({
+					id: 'substrate-credential',
+				} as never);
+				const data = {
+					endpoint: 'api.example.test:443',
+					routerUrl: 'https://router.example.test',
+					atespace: 'sandboxes',
+					template: 'sandbox',
+					apiToken: 'fixture-token',
+				};
+				const result = await service.updateAdminSettings(
+					{ sandboxConnection: { type: 'substrateApi', data } },
+					adminUser,
+				);
+				expect(credentialsService.createInstanceCredential).toHaveBeenCalledWith(
+					expect.objectContaining({ type: 'substrateApi', usageScope: 'instance' }),
+					adminUser,
+					operationContext,
+					expect.objectContaining({
+						encryptedData: expect.objectContaining({ data: 'encrypted' }),
+					}),
+				);
+				expect(instanceCredentialBroker.assignForUse).toHaveBeenCalledWith(
+					expect.objectContaining({ id: 'instance-ai:sandbox:substrate' }),
+					'substrate-credential',
+					operationContext,
+				);
+				for (const id of ['instance-ai:sandbox:daytona', 'instance-ai:sandbox:n8n'])
+					expect(instanceCredentialBroker.clearForUse).toHaveBeenCalledWith(
+						expect.objectContaining({ id }),
+						operationContext,
+					);
+				expect(result).toMatchObject({
+					substrateCredentialId: 'substrate-credential',
+					sandboxProvider: 'substrate',
+					sandboxEnabled: true,
+				});
+				expect(JSON.stringify(result)).not.toContain('fixture-token');
+				expect(persistedSettingsValue).not.toContain('fixture-token');
+				expect(persistedSettingsValue).not.toContain('api.example.test');
+			});
+
+			it('rejects Substrate connection edits without credential-management permission', async () => {
+				await expect(
+					service.updateAdminSettings(
+						{ sandboxConnection: { type: 'substrateApi', data: {} } },
+						memberUser,
+					),
+				).rejects.toThrow('permission');
+				expect(credentialsService.createInstanceCredential).not.toHaveBeenCalled();
 			});
 
 			it('should run external credential hooks before the locked transaction starts', async () => {

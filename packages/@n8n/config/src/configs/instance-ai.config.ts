@@ -161,6 +161,34 @@ export class InstanceAiConfig {
 	@Env('N8N_INSTANCE_AI_SANDBOX_PROVIDER')
 	sandboxProvider: string = 'n8n-sandbox';
 
+	/** Substrate control API endpoint in host:port format. Leave unset to use a saved sandbox connection. */
+	@Env('SUBSTRATE_API_ENDPOINT')
+	substrateEndpoint: string = '';
+
+	/** Private HTTP or HTTPS URL of the Substrate router. Leave unset to use a saved sandbox connection. */
+	@Env('SUBSTRATE_ROUTER_URL')
+	substrateRouterUrl: string = '';
+
+	/** Substrate Atespace for sandbox Actors. Leave unset to use a saved sandbox connection. */
+	@Env('SUBSTRATE_ATESPACE')
+	substrateAtespace: string = '';
+
+	/** ActorTemplate name in the sandbox Atespace. Leave unset to use a saved sandbox connection. */
+	@Env('SUBSTRATE_ACTOR_TEMPLATE')
+	substrateTemplate: string = '';
+
+	/** Path to a readable Substrate bearer token file. n8n reads it for each control request and uses it instead of a saved access token. */
+	@Env('SUBSTRATE_TOKEN_FILE')
+	substrateTokenFile: string = '';
+
+	/** Path to a PEM CA bundle for the Substrate control API. Saved connections use system trust when unset. */
+	@Env('SUBSTRATE_CA_FILE')
+	substrateCaFile: string = '';
+
+	/** TLS server name for the Substrate control API. Saved connections use the endpoint host when unset. */
+	@Env('SUBSTRATE_SERVER_NAME')
+	substrateServerName: string = 'api.ate-system.svc';
+
 	/** Daytona API URL (e.g. "http://localhost:3000/api"). */
 	@Env('DAYTONA_API_URL')
 	daytonaApiUrl: string = '';
