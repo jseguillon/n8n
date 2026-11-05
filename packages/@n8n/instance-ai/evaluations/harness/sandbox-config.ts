@@ -19,7 +19,7 @@ const DEFAULT_TIMEOUT_MS = 300_000;
  * than the SDK's 300s default; 900s avoids spurious eval-run failures.
  */
 const DEFAULT_DAYTONA_CREATE_TIMEOUT_SECONDS = 900;
-const VALID_PROVIDERS: SandboxProvider[] = ['n8n-sandbox', 'daytona'];
+const VALID_PROVIDERS: SandboxProvider[] = ['n8n-sandbox', 'daytona', 'substrate'];
 
 export function resolveSandboxConfig(env: NodeJS.ProcessEnv): SandboxConfig {
 	const providerRaw = env.N8N_INSTANCE_AI_SANDBOX_PROVIDER ?? 'n8n-sandbox';
@@ -78,6 +78,34 @@ export function resolveSandboxConfig(env: NodeJS.ProcessEnv): SandboxConfig {
 			...(apiKey ? { apiKey } : {}),
 			timeout,
 		};
+	}
+
+	if (provider === 'substrate') {
+		const connection = {
+			endpoint: env.SUBSTRATE_API_ENDPOINT ?? '',
+			routerUrl: env.SUBSTRATE_ROUTER_URL ?? '',
+			atespace: env.SUBSTRATE_ATESPACE ?? '',
+			template: env.SUBSTRATE_ACTOR_TEMPLATE ?? '',
+			tokenFile: env.SUBSTRATE_TOKEN_FILE ?? '',
+			caFile: env.SUBSTRATE_CA_FILE ?? '',
+			serverName: env.SUBSTRATE_SERVER_NAME ?? 'api.ate-system.svc',
+		};
+		const missing = [
+			['SUBSTRATE_API_ENDPOINT', connection.endpoint],
+			['SUBSTRATE_ROUTER_URL', connection.routerUrl],
+			['SUBSTRATE_ATESPACE', connection.atespace],
+			['SUBSTRATE_ACTOR_TEMPLATE', connection.template],
+			['SUBSTRATE_TOKEN_FILE', connection.tokenFile],
+			['SUBSTRATE_CA_FILE', connection.caFile],
+		]
+			.filter(([, value]) => !value.trim())
+			.map(([name]) => name);
+		if (missing.length > 0) {
+			throw new Error(
+				`${missing.join(', ')} required for sandbox provider "substrate". Set the Substrate connection environment variables.`,
+			);
+		}
+		return { enabled: true, provider: 'substrate', connection, timeout };
 	}
 
 	const exhaustiveProvider: never = provider;

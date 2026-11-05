@@ -1,9 +1,11 @@
-import { type SandboxClient, SandboxServiceError } from '@n8n/sandbox-client';
+import { SandboxServiceError } from '@n8n/sandbox-client';
 import { dirname } from 'node:path/posix';
 
 import { BaseFilesystem, type BaseFilesystemOptions } from './base-filesystem';
 import { raceWithAbort } from '../../sdk/abort';
 import type { N8nSandboxServiceSandbox } from '../sandbox/n8n-sandbox-sandbox';
+import { SubstrateSandbox } from '../sandbox/substrate-sandbox';
+import type { SandboxFileClient } from '../sandbox/types';
 import type {
 	AbortableOptions,
 	AppendOptions,
@@ -30,27 +32,31 @@ export class N8nSandboxFilesystem extends BaseFilesystem {
 
 	readonly name = 'N8nSandboxFilesystem';
 
-	readonly provider = 'n8n-sandbox';
+	readonly provider: string;
 
 	status: ProviderStatus = 'pending';
 
 	constructor(
-		private readonly sandbox: N8nSandboxServiceSandbox,
+		private readonly sandbox: N8nSandboxServiceSandbox | SubstrateSandbox,
 		options?: BaseFilesystemOptions,
 	) {
 		super(options);
+		this.provider = sandbox.provider;
 		this.id = `n8n-sandbox-fs-${sandbox.id}`;
 	}
 
 	private async withSandbox<T>(
 		abortSignal: AbortSignal | undefined,
-		op: (client: SandboxClient, sandboxId: string) => Promise<T>,
+		op: (client: SandboxFileClient, sandboxId: string) => Promise<T>,
 	): Promise<T> {
 		await this.ensureReady();
-		return await raceWithAbort(
-			async () => await this.sandbox.withClient(op, { abortSignal }),
-			abortSignal,
-		);
+		return await raceWithAbort(async () => {
+			if (this.sandbox instanceof SubstrateSandbox) {
+				await this.sandbox.ensureRunning({ abortSignal });
+				return await op(this.sandbox.getFileClient(abortSignal), this.sandbox.id);
+			}
+			return await this.sandbox.withClient(op, { abortSignal });
+		}, abortSignal);
 	}
 
 	async readFile(path: string, options?: ReadOptions): Promise<string | Buffer> {
