@@ -12,6 +12,7 @@ export function getSandboxHome(provider: SandboxProvider): string {
 		case 'daytona':
 			return DAYTONA_HOME;
 		case 'n8n-sandbox':
+		case 'substrate':
 			return N8N_SANDBOX_HOME;
 	}
 }
@@ -50,7 +51,9 @@ async function initializeLazyFilesystem(workspace: SandboxWorkspace): Promise<vo
 
 function getFallbackHome(workspace: SandboxWorkspace): string {
 	const provider = workspace.sandbox?.provider;
-	return getSandboxHome(provider === 'n8n-sandbox' ? provider : 'daytona');
+	return getSandboxHome(
+		provider === 'n8n-sandbox' || provider === 'substrate' ? provider : 'daytona',
+	);
 }
 
 export async function getWorkspaceRoot(workspace: SandboxWorkspace): Promise<string> {

@@ -1,4 +1,5 @@
 import type { CreateSandboxFromImageParams } from '@daytona/sdk';
+import type { SandboxClient } from '@n8n/sandbox-client';
 
 import type { BaseFilesystemOptions } from '../filesystem/base-filesystem';
 import type {
@@ -51,7 +52,20 @@ export type {
 	WriteOptions,
 };
 
-export type SandboxProvider = 'daytona' | 'n8n-sandbox';
+export type SandboxProvider = 'daytona' | 'n8n-sandbox' | 'substrate';
+
+export type SandboxFileClient = Pick<
+	SandboxClient,
+	| 'readFile'
+	| 'writeFile'
+	| 'appendFile'
+	| 'deleteFile'
+	| 'copyFile'
+	| 'moveFile'
+	| 'mkdir'
+	| 'listFiles'
+	| 'stat'
+>;
 
 export interface SandboxConfigBase {
 	provider: SandboxProvider;
@@ -102,7 +116,17 @@ export interface N8nSandboxConfig extends EnabledSandboxConfigBase {
 	id?: string;
 }
 
-export type SandboxConfig = DisabledSandboxConfig | DaytonaSandboxConfig | N8nSandboxConfig;
+export interface SubstrateSandboxConfig extends EnabledSandboxConfigBase {
+	provider: 'substrate';
+	id?: string;
+	connection: import('./substrate-control').SubstrateConnection;
+}
+
+export type SandboxConfig =
+	| DisabledSandboxConfig
+	| DaytonaSandboxConfig
+	| N8nSandboxConfig
+	| SubstrateSandboxConfig;
 
 export type SandboxInstance = WorkspaceSandbox;
 export type SandboxFilesystem = WorkspaceFilesystem;
