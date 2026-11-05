@@ -357,6 +357,80 @@ describe('InstanceAiOnboardingWizard', () => {
 		await waitFor(() => expect(emitted().advance).toEqual([[]]), { timeout: 2500 });
 	});
 
+	it.each([false, true])(
+		'verifies and saves a Substrate connection with server-managed token=%s',
+		async (managed) => {
+			const { pinia, store } = setupStore({
+				envManaged: {
+					model: { provider: false, apiKey: false, baseUrl: false, model: false },
+					sandbox: { provider: false, serviceUrl: false, apiKey: false, substrateToken: managed },
+					search: { provider: false, apiKey: false, url: false },
+				},
+			});
+			vi.mocked(store.verifySandbox).mockResolvedValue({ ok: true });
+			const { findByTestId, getByTestId, queryByTestId } = renderWizard({
+				pinia,
+				props: { step: 'sandbox', surface: 'settings' },
+			});
+			await fireEvent.click(await findByTestId('assistant-sandbox-substrate'));
+			expect(getByTestId('n8n-agent-sandbox-dialog-save')).toBeDisabled();
+			const data = {
+				endpoint: 'api.example.test:443',
+				routerUrl: 'https://router.example.test',
+				atespace: 'sandboxes',
+				template: 'sandbox',
+			};
+			for (const [field, value] of Object.entries(data))
+				await fireEvent.update(inputFor(getByTestId(`assistant-substrate-${field}`)), value);
+			if (managed) {
+				expect(queryByTestId('assistant-substrate-token')).not.toBeInTheDocument();
+				expect(getByTestId('assistant-substrate-managed-token')).toBeVisible();
+			} else {
+				expect(inputFor(getByTestId('assistant-substrate-token'))).toHaveAttribute(
+					'type',
+					'password',
+				);
+				await fireEvent.update(inputFor(getByTestId('assistant-substrate-token')), 'fixture-token');
+			}
+			const connection = {
+				type: 'substrateApi',
+				data: { ...data, ...(managed ? {} : { apiToken: 'fixture-token' }) },
+			};
+			await fireEvent.click(getByTestId('n8n-agent-sandbox-dialog-save'));
+			await waitFor(() => expect(store.save).toHaveBeenCalledWith(false));
+			expect(store.verifySandbox).toHaveBeenCalledWith({ provider: 'substrate', connection });
+			expect(store.setField).toHaveBeenCalledWith('sandboxProvider', 'substrate');
+			expect(store.setField).toHaveBeenCalledWith('sandboxEnabled', true);
+			expect(store.setField).toHaveBeenCalledWith('sandboxConnection', connection);
+			expect(queryByTestId('assistant-substrate-tokenFile')).not.toBeInTheDocument();
+			expect(queryByTestId('assistant-substrate-caFile')).not.toBeInTheDocument();
+			expect(queryByTestId('assistant-substrate-serverName')).not.toBeInTheDocument();
+		},
+	);
+
+	it('hydrates an assigned Substrate connection for editing', async () => {
+		const { pinia, credentialsStore } = setupStore({
+			sandboxProvider: 'substrate',
+			substrateCredentialId: 'substrate-credential',
+		});
+		vi.mocked(credentialsStore.getCredentialData).mockResolvedValue({
+			data: {
+				endpoint: 'api.example.test:443',
+				routerUrl: 'https://router.example.test',
+				atespace: 'sandboxes',
+				template: 'sandbox',
+				apiToken: 'masked-token',
+			},
+		} as never);
+		const { getByTestId } = renderWizard({ pinia, props: { step: 'sandbox' } });
+		await waitFor(() =>
+			expect(inputFor(getByTestId('assistant-substrate-endpoint')).value).toBe(
+				'api.example.test:443',
+			),
+		);
+		expect(inputFor(getByTestId('assistant-substrate-token')).value).toBe('masked-token');
+	});
+
 	it('hydrates and verifies a saved Daytona connection', async () => {
 		const { pinia, store, credentialsStore } = setupStore({
 			sandboxProvider: 'daytona',
@@ -417,6 +491,36 @@ describe('InstanceAiOnboardingWizard', () => {
 		expect(store.setField).toHaveBeenCalledWith('sandboxEnabled', true);
 		expect(store.refreshCredentials).toHaveBeenCalled();
 		await waitFor(() => expect(emitted().advance).toEqual([[]]), { timeout: 2500 });
+	});
+
+	it('verifies an existing Substrate credential on the backend without reading its secret', async () => {
+		const { pinia, store, credentialsStore } = setupStore();
+		store.$patch({
+			serviceCredentials: [
+				{ id: 'existing-substrate', name: 'Existing Substrate', type: 'substrateApi' },
+				{ id: 'existing-daytona', name: 'Existing Daytona', type: 'daytonaApi' },
+			],
+		});
+		vi.mocked(store.verifySandbox).mockResolvedValue({ ok: true });
+		const { findByTestId, findByText, getByTestId } = renderWizard({
+			pinia,
+			props: { step: 'sandbox', editMode: true, surface: 'settings' },
+		});
+		await fireEvent.click(
+			inputFor(await findByTestId('n8n-agent-sandbox-existing-credential-select')),
+		);
+		await fireEvent.click(await findByText('Existing Substrate · Agent Substrate'));
+		await fireEvent.click(getByTestId('n8n-agent-sandbox-dialog-save'));
+		await waitFor(() =>
+			expect(store.verifySandbox).toHaveBeenCalledWith({
+				provider: 'substrate',
+				credentialId: 'existing-substrate',
+			}),
+		);
+		expect(credentialsStore.getCredentialData).not.toHaveBeenCalled();
+		expect(store.setField).toHaveBeenCalledWith('substrateCredentialId', 'existing-substrate');
+		expect(store.setField).toHaveBeenCalledWith('daytonaCredentialId', null);
+		expect(store.setField).toHaveBeenCalledWith('n8nSandboxCredentialId', null);
 	});
 
 	it('confirms an environment-managed sandbox and enables it', async () => {

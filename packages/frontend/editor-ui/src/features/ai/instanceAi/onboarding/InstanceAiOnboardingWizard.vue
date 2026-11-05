@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, reactive, ref, watch } from 'vue';
 import type {
 	InstanceAiConnectionUpdate,
 	InstanceAiProviderConnection,
@@ -104,10 +104,42 @@ const modelProvider = ref<InstanceAiModelProvider>('anthropic');
 const modelApiKey = ref('');
 const modelBaseUrl = ref('');
 const modelName = ref<string>(DEFAULT_MODEL_NAME);
-const sandboxProvider = ref<'n8n-sandbox' | 'daytona' | null>(null);
+const sandboxProvider = ref<'n8n-sandbox' | 'daytona' | 'substrate' | null>(null);
 const sandboxServiceUrl = ref('');
 const sandboxApiKey = ref('');
 const daytonaApiKey = ref('');
+const substrate = reactive({
+	endpoint: '',
+	routerUrl: '',
+	atespace: '',
+	template: '',
+	apiToken: '',
+});
+const substrateFields = [
+	{
+		key: 'endpoint',
+		label: 'instanceAi.onboarding.substrate.endpoint',
+		placeholder: 'api.ate-system.svc:443',
+	},
+	{
+		key: 'routerUrl',
+		label: 'instanceAi.onboarding.substrate.routerUrl',
+		placeholder: 'http://atenet-router.ate-system.svc',
+	},
+	{
+		key: 'atespace',
+		label: 'instanceAi.onboarding.substrate.atespace',
+		placeholder: 'n8n-sandboxes',
+	},
+	{
+		key: 'template',
+		label: 'instanceAi.onboarding.substrate.template',
+		placeholder: 'n8n-sandbox',
+	},
+] as const;
+const substrateTokenManaged = computed(
+	() => store.settings?.envManaged?.sandbox?.substrateToken === true,
+);
 const searchProvider = ref<InstanceAiSearchProvider | null>(null);
 const searchInput = ref('');
 const selectedExistingCredentialId = ref('');
@@ -141,9 +173,11 @@ const isProxyDaytonaSelection = computed(
 function assignedCredentialId(): string | null {
 	if (props.step === 'model') return store.settings?.modelCredentialId ?? null;
 	if (props.step === 'sandbox') {
-		return store.settings?.sandboxProvider === 'daytona'
-			? (store.settings?.daytonaCredentialId ?? null)
-			: (store.settings?.n8nSandboxCredentialId ?? null);
+		return store.settings?.sandboxProvider === 'substrate'
+			? (store.settings?.substrateCredentialId ?? null)
+			: store.settings?.sandboxProvider === 'daytona'
+				? (store.settings?.daytonaCredentialId ?? null)
+				: (store.settings?.n8nSandboxCredentialId ?? null);
 	}
 	if (props.step === 'search') return store.settings?.searchCredentialId ?? null;
 	return null;
@@ -151,6 +185,7 @@ function assignedCredentialId(): string | null {
 
 function credentialProviderLabel(credential: InstanceAiProviderConnection): string {
 	if (credential.type === 'daytonaApi') return SANDBOX_PROVIDER_LABELS.daytona;
+	if (credential.type === 'substrateApi') return SANDBOX_PROVIDER_LABELS.substrate;
 	if (credential.type === 'httpHeaderAuth') return SANDBOX_PROVIDER_LABELS['n8n-sandbox'];
 	return credentialsStore.getCredentialTypeByName(credential.type)?.displayName ?? credential.type;
 }
@@ -163,7 +198,7 @@ const allCompatibleCredentials = computed(() => {
 		props.step === 'model'
 			? INSTANCE_AI_MODEL_PROVIDERS.map(({ credentialType }) => credentialType)
 			: props.step === 'sandbox'
-				? ['daytonaApi', 'httpHeaderAuth']
+				? ['daytonaApi', 'httpHeaderAuth', 'substrateApi']
 				: INSTANCE_AI_SEARCH_PROVIDERS.map(({ credentialType }) => credentialType),
 	);
 	return credentials.filter((credential) => allowedTypes.has(credential.type));
@@ -208,6 +243,7 @@ function formSnapshot(): string {
 		sandboxServiceUrl: sandboxServiceUrl.value,
 		sandboxApiKey: sandboxApiKey.value,
 		daytonaApiKey: daytonaApiKey.value,
+		substrate: { ...substrate },
 		searchProvider: searchProvider.value,
 		searchValue: searchInput.value,
 		selectedExistingCredentialId: selectedExistingCredentialId.value,
@@ -234,6 +270,11 @@ const stepReady = computed(() => {
 				: true;
 		}
 		if (isProxyDaytonaSelection.value) return true;
+		if (sandboxProvider.value === 'substrate')
+			return (
+				substrateFields.every(({ key }) => substrate[key].trim()) &&
+				(substrateTokenManaged.value || Boolean(substrate.apiToken.trim()))
+			);
 		if (sandboxProvider.value === 'daytona') return Boolean(daytonaApiKey.value.trim());
 		if (sandboxProvider.value === 'n8n-sandbox') {
 			return Boolean(sandboxServiceUrl.value.trim() && sandboxApiKey.value.trim());
@@ -321,7 +362,12 @@ function applyExistingCredential(credential: InstanceAiProviderConnection): void
 			INSTANCE_AI_CURATED_MODELS[modelProvider.value][0] ||
 			'';
 	} else if (props.step === 'sandbox') {
-		sandboxProvider.value = credential.type === 'daytonaApi' ? 'daytona' : 'n8n-sandbox';
+		sandboxProvider.value =
+			credential.type === 'substrateApi'
+				? 'substrate'
+				: credential.type === 'daytonaApi'
+					? 'daytona'
+					: 'n8n-sandbox';
 	} else if (props.step === 'search') {
 		searchProvider.value = credential.type === 'braveSearchApi' ? 'brave' : 'searxng';
 	}
@@ -377,7 +423,25 @@ async function hydrateSandbox(generation: number): Promise<void> {
 	sandboxServiceUrl.value = store.settings?.n8nSandboxServiceUrl ?? '';
 	sandboxApiKey.value = '';
 	daytonaApiKey.value = '';
+	Object.assign(substrate, {
+		endpoint: '',
+		routerUrl: '',
+		atespace: '',
+		template: '',
+		apiToken: '',
+	});
 	if (sandboxEnvManaged.value) return;
+	if (store.settings?.sandboxProvider === 'substrate') {
+		sandboxProvider.value = 'substrate';
+		const id = store.settings.substrateCredentialId;
+		if (id) {
+			const data = await credentialData(id);
+			if (generation !== hydrationGeneration) return;
+			for (const field of [...substrateFields.map(({ key }) => key), 'apiToken'] as const)
+				substrate[field] = readString(data, field);
+		}
+		return;
+	}
 	const isDaytona = store.settings?.sandboxProvider === 'daytona';
 	const credentialId = isDaytona
 		? store.settings?.daytonaCredentialId
@@ -449,6 +513,7 @@ watch(
 		sandboxServiceUrl,
 		sandboxApiKey,
 		daytonaApiKey,
+		() => JSON.stringify(substrate),
 		searchProvider,
 		searchInput,
 		selectedExistingCredentialId,
@@ -505,6 +570,15 @@ function modelConnection(): InstanceAiConnectionUpdate {
 }
 
 function sandboxConnection(): InstanceAiConnectionUpdate | undefined {
+	if (sandboxProvider.value === 'substrate') {
+		return {
+			type: 'substrateApi',
+			data: {
+				...Object.fromEntries(substrateFields.map(({ key }) => [key, substrate[key].trim()])),
+				...(substrateTokenManaged.value ? {} : { apiToken: substrate.apiToken.trim() }),
+			},
+		};
+	}
 	if (sandboxProvider.value === 'daytona') {
 		return {
 			type: 'daytonaApi',
@@ -577,7 +651,13 @@ async function saveExistingCredential(): Promise<boolean> {
 		store.setField('modelCredentialId', credential.id);
 		store.setField('modelName', modelName.value.trim());
 	} else if (props.step === 'sandbox') {
-		const provider = credential.type === 'daytonaApi' ? 'daytona' : 'n8n-sandbox';
+		const provider =
+			credential.type === 'substrateApi'
+				? 'substrate'
+				: credential.type === 'daytonaApi'
+					? 'daytona'
+					: 'n8n-sandbox';
+		store.setField('substrateCredentialId', provider === 'substrate' ? credential.id : null);
 		store.setField('daytonaCredentialId', provider === 'daytona' ? credential.id : null);
 		store.setField('n8nSandboxCredentialId', provider === 'n8n-sandbox' ? credential.id : null);
 		store.setField('sandboxProvider', provider);
@@ -599,6 +679,8 @@ async function saveExistingCredential(): Promise<boolean> {
 async function verifyExistingCredential(): Promise<InstanceAiVerificationResponse> {
 	const credential = selectedExistingCredential.value;
 	if (!credential) return { ok: false, failure: 'provider_error' };
+	if (credential.type === 'substrateApi')
+		return await store.verifySandbox({ provider: 'substrate', credentialId: credential.id });
 	return (await testSavedCredential(credential.id, credential.name, credential.type))
 		? { ok: true }
 		: {
@@ -725,6 +807,23 @@ const successMessage = computed(() => {
 });
 const modelProviderLabel = (provider: (typeof INSTANCE_AI_MODEL_PROVIDERS)[number]) =>
 	provider.label ?? i18n.baseText('instanceAi.onboarding.model.customProvider');
+
+function sandboxProviderBadge(provider: (typeof INSTANCE_AI_SANDBOX_PROVIDERS)[number]): string {
+	if (provider.id === 'n8n-sandbox')
+		return i18n.baseText('instanceAi.onboarding.sandbox.freeRecommended');
+	if (provider.id === 'daytona') return i18n.baseText('instanceAi.onboarding.sandbox.paid');
+	return i18n.baseText('instanceAi.onboarding.sandbox.selfHosted');
+}
+
+function sandboxProviderDescription(
+	provider: (typeof INSTANCE_AI_SANDBOX_PROVIDERS)[number],
+): string {
+	if (provider.id === 'n8n-sandbox')
+		return i18n.baseText('instanceAi.onboarding.sandbox.n8nDescription');
+	if (provider.id === 'daytona')
+		return i18n.baseText('instanceAi.onboarding.sandbox.daytonaDescription');
+	return i18n.baseText('instanceAi.onboarding.sandbox.substrateDescription');
+}
 const existingCredentialLabel = (credential: InstanceAiProviderConnection) =>
 	`${credential.name} · ${credentialProviderLabel(credential)}`;
 
@@ -1000,22 +1099,20 @@ const stepLede = computed(() => {
 								<span :class="$style.optionTitle">
 									<N8nText bold step="sm">{{ provider.onboardingLabel }}</N8nText>
 									<N8nBadge
-										:variant="provider.id === 'n8n-sandbox' ? 'secondary' : 'outline'"
+										:variant="
+											provider.id === 'n8n-sandbox'
+												? 'secondary'
+												: provider.id === 'daytona'
+													? 'outline'
+													: 'subtle'
+										"
 										:class="$style.optionBadge"
 									>
-										{{
-											provider.id === 'n8n-sandbox'
-												? i18n.baseText('instanceAi.onboarding.sandbox.freeRecommended')
-												: i18n.baseText('instanceAi.onboarding.sandbox.paid')
-										}}
+										{{ sandboxProviderBadge(provider) }}
 									</N8nBadge>
 								</span>
 								<N8nText color="text-base" step="sm" :class="$style.optionDescription">
-									{{
-										provider.id === 'n8n-sandbox'
-											? i18n.baseText('instanceAi.onboarding.sandbox.n8nDescription')
-											: i18n.baseText('instanceAi.onboarding.sandbox.daytonaDescription')
-									}}
+									{{ sandboxProviderDescription(provider) }}
 								</N8nText>
 							</span>
 						</div>
@@ -1069,6 +1166,58 @@ const stepLede = computed(() => {
 										? 'n8n-agent-sandbox-api-key-input'
 										: 'assistant-sandbox-api-key'
 								"
+							/>
+						</N8nInputLabel>
+					</div>
+					<div
+						v-else-if="
+							!sandboxEnvManaged && sandboxProvider === 'substrate' && !selectedExistingCredentialId
+						"
+						:class="$style.fields"
+					>
+						<N8nText step="xs">{{
+							i18n.baseText('instanceAi.onboarding.substrate.description')
+						}}</N8nText>
+						<N8nInputLabel
+							v-for="field in substrateFields"
+							:key="field.key"
+							:class="$style.compactLabel"
+							:label="i18n.baseText(field.label)"
+							:input-name="`assistant-substrate-${field.key}`"
+						>
+							<N8nInput
+								:id="`assistant-substrate-${field.key}`"
+								v-model="substrate[field.key]"
+								:disabled="readOnly"
+								class="ph-no-capture"
+								type="text"
+								autocomplete="off"
+								:spellcheck="false"
+								:placeholder="field.placeholder"
+								:data-test-id="`assistant-substrate-${field.key}`"
+							/>
+						</N8nInputLabel>
+						<N8nText
+							v-if="substrateTokenManaged"
+							step="xs"
+							data-test-id="assistant-substrate-managed-token"
+							>{{ i18n.baseText('instanceAi.onboarding.substrate.managedToken') }}</N8nText
+						>
+						<N8nInputLabel
+							v-else
+							:class="$style.compactLabel"
+							:label="i18n.baseText('instanceAi.onboarding.substrate.token')"
+							input-name="assistant-substrate-token"
+						>
+							<N8nInput
+								id="assistant-substrate-token"
+								v-model="substrate.apiToken"
+								:disabled="readOnly"
+								class="ph-no-capture"
+								type="password"
+								autocomplete="off"
+								:spellcheck="false"
+								data-test-id="assistant-substrate-token"
 							/>
 						</N8nInputLabel>
 					</div>

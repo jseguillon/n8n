@@ -21,6 +21,7 @@ const isEnvironmentManaged = computed(
 );
 const sandboxValue = computed(() => {
 	if (isEnvironmentManaged.value) return i18n.baseText('instanceAi.onboarding.foundOnServer');
+	if (store.settings?.sandboxProvider === 'substrate') return SANDBOX_PROVIDER_LABELS.substrate;
 	if (sandboxCredentialId.value) {
 		return store.settings?.sandboxProvider === 'daytona'
 			? SANDBOX_PROVIDER_LABELS.daytona

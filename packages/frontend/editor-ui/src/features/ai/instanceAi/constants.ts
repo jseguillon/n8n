@@ -12,6 +12,7 @@ export const INSTANCE_AI_SOURCE_QUERY = 'source';
 export const SANDBOX_PROVIDER_LABELS = {
 	daytona: 'Daytona',
 	'n8n-sandbox': 'n8n Sandbox Service',
+	substrate: 'Agent Substrate',
 } as const;
 
 export type InstanceAiConnectionKind = 'model' | 'sandbox' | 'search';
