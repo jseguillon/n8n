@@ -1,0 +1,71 @@
+name: 'Build: Substrate n8n Image'
+
+on:
+  push:
+    branches:
+      - 'feat/substrate-ghcr-publish'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    name: Build and push n8n image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    env:
+      NODE_OPTIONS: '--max-old-space-size=7168'
+      NODE_VERSION: '26.12.1'
+      N8N_VERSION: branch-feat-substrate-ghcr-publish
+      N8N_RELEASE_TYPE: branch
+      IMAGE_BASE_NAME: ghcr.io/${{ github.repository_owner }}/n8n
+      IMAGE_TAG: branch-feat-substrate-ghcr-publish
+      PLATFORMS: linux/amd64
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Build n8n application
+        uses: ./.github/actions/setup-nodejs
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          build-command: pnpm build:n8n
+          download-safe-chain-via-api: true
+        env:
+          RELEASE: ${{ env.N8N_VERSION }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
+      - name: Determine image tags
+        id: tags
+        env:
+          SHORT_SHA: ${{ github.sha }}
+        run: |
+          SHORT_SHA="${SHORT_SHA:0:7}"
+          node .github/scripts/docker/docker-tags.mjs \
+            --image n8n \
+            --version "$N8N_VERSION" \
+            --sha "$SHORT_SHA"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Login to GHCR
+        uses: ./.github/actions/docker-registry-login
+        with:
+          login-ghcr: true
+
+      - name: Build and push image
+        env:
+          N8N_TAGS: ${{ steps.tags.outputs.tags }}
+        run: |
+          docker buildx bake -f docker/docker-bake.hcl n8n \
+            --provenance=false \
+            --sbom=false \
+            --set '*.output=type=image,oci-mediatypes=true,push=true'
