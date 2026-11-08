@@ -32,8 +32,14 @@ const fileStat = z
 		modifiedAt: modified_at,
 	}));
 const fileEntry = z
-	.object({ name: z.string(), size: z.number(), is_dir: z.boolean() })
-	.transform(({ is_dir, ...entry }) => ({ ...entry, isDir: is_dir }));
+	.object({
+		name: z.string(),
+		size: z.number(),
+		is_dir: z.boolean(),
+		type: z.enum(['file', 'directory']),
+		mod_time: z.string(),
+	})
+	.transform(({ is_dir, mod_time, ...entry }) => ({ ...entry, isDir: is_dir, modTime: mod_time }));
 const MAX_EXECUTION_EVENT_BYTES = 1024 * 1024;
 const MAX_EXECUTION_OUTPUT_BYTES = 10 * 1024 * 1024;
 const eventSchema = z.discriminatedUnion('type', [
