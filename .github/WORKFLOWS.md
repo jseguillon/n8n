@@ -720,6 +720,7 @@ inputs:
   enable-docker-cache: # default: 'false' (Blacksmith Buildx)
   docker-cache-key:    # required when enable-docker-cache is true
   build-command:       # default: 'pnpm build'
+  download-safe-chain-via-api: # default: 'false'; use the GitHub API for the pinned binary
 ```
 
 The pnpm version comes from the `packageManager` field in the root
