@@ -39,7 +39,17 @@ describe('Substrate sandbox daemon protocol', () => {
 	it('maps daemon file metadata to the shared filesystem contract', async () => {
 		const fetch = vi
 			.fn()
-			.mockResolvedValueOnce(Response.json([{ name: 'check.txt', size: 4, is_dir: false }]))
+			.mockResolvedValueOnce(
+				Response.json([
+					{
+						name: 'check.txt',
+						size: 4,
+						is_dir: false,
+						type: 'file',
+						mod_time: '2026-10-20T01:00:00Z',
+					},
+				]),
+			)
 			.mockResolvedValueOnce(
 				Response.json({
 					name: 'check.txt',
@@ -53,7 +63,13 @@ describe('Substrate sandbox daemon protocol', () => {
 		vi.stubGlobal('fetch', fetch);
 		const sandbox = new SubstrateSandbox(connection);
 		expect(await sandbox.listFiles(sandbox.id, { path: '/home/user' })).toEqual([
-			{ name: 'check.txt', size: 4, isDir: false },
+			{
+				name: 'check.txt',
+				size: 4,
+				type: 'file',
+				isDir: false,
+				modTime: '2026-10-20T01:00:00Z',
+			},
 		]);
 		expect(await sandbox.stat(sandbox.id, '/home/user/check.txt')).toMatchObject({
 			createdAt: '2026-10-20T00:00:00Z',
