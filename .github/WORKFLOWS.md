@@ -809,10 +809,10 @@ Workflows with `workflow_call` trigger:
 | `sbom-validation-callable.yml`     | `sha`                                         | Read-only SBOM validation |
 | `test-single-instance-npm.yml`     | `scope`, `base-ref`, `base-branch`, `blocking`, `timeout-minutes` | Dependency duplication |
 
-The `feat/substrate-ghcr-publish` branch also triggers `docker-build-push.yml` on
-each push. It publishes `branch-feat-substrate-ghcr-publish` images under
-`ghcr.io/<owner>/n8n` and the matching runners packages. Fork builds use
-GitHub-hosted runners.
+The `feat/substrate-ghcr-publish` branch triggers `build-substrate-n8n.yml` on
+each push. It builds the n8n image on a GitHub-hosted runner and publishes
+`branch-feat-substrate-ghcr-publish` and commit-specific tags under
+`ghcr.io/<owner>/n8n`.
 
 ---
 
