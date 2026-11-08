@@ -815,6 +815,11 @@ Workflows with `workflow_call` trigger:
 | `release-setup-trusted-publishing.yml` | `setup_required`                           | Find and configure unpublished workspace packages |
 | `release-publish-new-package.yml`  | `package-path`                                | Publish and configure one package |
 
+The `feat/substrate-ghcr-publish` branch also triggers `docker-build-push.yml` on
+each push. It publishes `branch-feat-substrate-ghcr-publish` images under
+`ghcr.io/<owner>/n8n` and the matching runners packages. Fork builds use
+GitHub-hosted runners.
+
 ---
 
 ## Scripts
