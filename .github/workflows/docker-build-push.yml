@@ -181,9 +181,11 @@ jobs:
         with:
           node-version: ${{ steps.node.outputs.version }}
           build-command: pnpm build:n8n
+          download-safe-chain-via-api: ${{ github.repository != 'n8n-io/n8n' }}
         env:
           RELEASE: ${{ needs.determine-build-context.outputs.n8n_version }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
 
       # Blacksmith routes actions/cache through its cache backend. The cache archive
       # preserves pnpm symlinks and executable modes across the job boundary.
