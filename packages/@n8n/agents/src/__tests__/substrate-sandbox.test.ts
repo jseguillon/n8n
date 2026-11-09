@@ -153,7 +153,7 @@ describe('Substrate sandbox daemon protocol', () => {
 			const initialDispatcher = (fetch.mock.calls[0][1] as RequestInit & { dispatcher: unknown })
 				.dispatcher;
 			await writeFile(routerCredentialFile, 'rotated-router-credential');
-			await request();
+			await request('/healthz');
 			const rotatedDispatcher = (fetch.mock.calls[1][1] as RequestInit & { dispatcher: unknown })
 				.dispatcher;
 			expect(rotatedDispatcher).not.toBe(initialDispatcher);
