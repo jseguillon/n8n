@@ -91,6 +91,7 @@ describe('InstanceAiSettingsService', () => {
 			substrateTemplate: 'sandbox',
 			substrateTokenFile: '/server/token',
 			substrateCaFile: '/server/ca',
+			substrateRouterCredentialFile: '/server/router-credential-bundle.pem',
 			substrateServerName: 'api.example.test',
 		});
 		sandboxSettingsService.getProvider.mockReturnValue('substrate');
@@ -148,6 +149,7 @@ describe('InstanceAiSettingsService', () => {
 			substrateTemplate: '',
 			substrateTokenFile: '',
 			substrateCaFile: '',
+			substrateRouterCredentialFile: '',
 			substrateServerName: '',
 		});
 		globalConfig.deployment.type = 'default';

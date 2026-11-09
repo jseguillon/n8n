@@ -185,6 +185,10 @@ export class InstanceAiConfig {
 	@Env('SUBSTRATE_CA_FILE')
 	substrateCaFile: string = '';
 
+	/** Path to a readable PEM PodIdentity bundle for Substrate router mTLS. */
+	@Env('SUBSTRATE_ROUTER_CREDENTIAL_FILE')
+	substrateRouterCredentialFile: string = '';
+
 	/** TLS server name for the Substrate control API. Saved connections use the endpoint host when unset. */
 	@Env('SUBSTRATE_SERVER_NAME')
 	substrateServerName: string = 'api.ate-system.svc';

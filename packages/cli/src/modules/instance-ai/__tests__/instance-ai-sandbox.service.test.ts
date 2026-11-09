@@ -1205,6 +1205,7 @@ describe('InstanceAiSandboxService', () => {
 						substrateTemplate: 'sandbox',
 						substrateTokenFile: '/run/secrets/token',
 						substrateCaFile: '/run/secrets/ca.crt',
+						substrateRouterCredentialFile: '/run/secrets/router-credential-bundle.pem',
 						substrateServerName: 'api.ate-system.svc',
 					},
 				});
@@ -1441,6 +1442,7 @@ describe('InstanceAiSandboxService', () => {
 					substrateTemplate: 'sandbox',
 					substrateTokenFile: '/run/secrets/token',
 					substrateCaFile: '/run/secrets/ca.crt',
+					substrateRouterCredentialFile: '/run/secrets/router-credential-bundle.pem',
 					substrateServerName: 'api.ate-system.svc',
 				},
 			});

@@ -90,9 +90,11 @@ export const INSTANCE_AI_N8N_SANDBOX_CREDENTIAL_POLICY: InstanceCredentialUse = 
 
 /** Connection fields belong to the instance credential; TLS and token files stay server-owned. */
 export function parseSubstrateCredential({ type, data }: SandboxCredential) {
-	if (['tokenFile', 'caFile', 'serverName'].some((field) => field in data)) {
+	if (
+		['tokenFile', 'caFile', 'routerCredentialFile', 'serverName'].some((field) => field in data)
+	) {
 		throw new UnprocessableRequestError(
-			'Substrate TLS trust and token files are managed on the server',
+			'Substrate TLS trust, router identity and token files are managed on the server',
 		);
 	}
 	if (data.apiToken !== undefined && typeof data.apiToken !== 'string') {
@@ -196,6 +198,11 @@ export class SandboxSettingsService {
 				'A Substrate access token or server token file is required',
 			);
 		}
+		if (!this.config.substrateRouterCredentialFile) {
+			throw new UnprocessableRequestError(
+				'A Substrate router client certificate file is required for mTLS ingress',
+			);
+		}
 		return {
 			enabled: true,
 			provider: 'substrate',
@@ -203,6 +210,7 @@ export class SandboxSettingsService {
 				...parsed,
 				tokenFile: this.config.substrateTokenFile || '',
 				caFile: this.config.substrateCaFile || '',
+				routerCredentialFile: this.config.substrateRouterCredentialFile || '',
 				serverName:
 					process.env.SUBSTRATE_SERVER_NAME?.trim() ||
 					parsed.endpoint.replace(/:\d+$/, '').replace(/^\[|\]$/g, ''),
