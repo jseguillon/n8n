@@ -154,8 +154,8 @@ describe('SubstrateControl transport', () => {
 		});
 		expect(metadataEntries.get('authorization')).toBe('Bearer token');
 		expect(makeUnaryRequest.mock.calls[0][0]).toMatchObject({
-			path: '/ateapi.Control/DeleteActor',
-			request: { actor: { atespace: 'test-space', name: 'n8n-workspace' }, anyState: true },
+			path: '/substrate.ateapi.v1.Control/DeleteActor',
+			request: { actor: { atespace: 'test-space', name: 'n8n-workspace' } },
 		});
 		expect(makeUnaryRequest.mock.calls[0][0].options.deadline).toBeGreaterThanOrEqual(
 			before + 1_000,
@@ -179,11 +179,13 @@ describe('SubstrateControl transport', () => {
 
 	it('serializes Actor creation and decodes GetActor responses', async () => {
 		const protocol = parse(`syntax = "proto3";
+package substrate.ateapi.v1;
 message ObjectRef { string atespace = 1; string name = 2; }
-message Actor { ObjectRef metadata = 1; ObjectRef actor_template = 4; }
+message ResourceMetadata { string atespace = 1; string name = 2; }
+message Actor { ResourceMetadata metadata = 1; ObjectRef actor_template = 2; }
 message CreateActorRequest { Actor actor = 1; }
 `).root;
-		const actor = protocol.lookupType('Actor');
+		const actor = protocol.lookupType('substrate.ateapi.v1.Actor');
 		readFile.mockImplementation(async (path: string) =>
 			path.endsWith('ca.crt') ? Buffer.from('ca') : 'token',
 		);
@@ -204,9 +206,11 @@ message CreateActorRequest { Actor actor = 1; }
 		await control.call('CreateActor', 'n8n-workspace');
 		const create = makeUnaryRequest.mock.calls[0][0];
 		const createRequest = protocol
-			.lookupType('CreateActorRequest')
+			.lookupType('substrate.ateapi.v1.CreateActorRequest')
 			.decode(create.serialize(create.request));
-		expect(protocol.lookupType('CreateActorRequest').toObject(createRequest)).toMatchObject({
+		expect(
+			protocol.lookupType('substrate.ateapi.v1.CreateActorRequest').toObject(createRequest),
+		).toMatchObject({
 			actor: {
 				metadata: { atespace: 'test-space', name: 'n8n-workspace' },
 				actorTemplate: { atespace: 'test-space', name: 'test-template' },
@@ -221,10 +225,12 @@ message CreateActorRequest { Actor actor = 1; }
 
 	it('creates a TLS passthrough policy for the npm registry', async () => {
 		const protocol = parse(`syntax = "proto3";
+package substrate.ateapi.v1;
 message ObjectRef { string atespace = 1; string name = 2; }
-message EgressPolicy { ObjectRef metadata = 1; repeated EgressRule rules = 2; }
-message EgressRule { TLSPassthroughRule tls_passthrough = 3; }
-message TLSPassthroughRule { repeated string hostnames = 1; Ports ports = 2; }
+message ResourceMetadata { string atespace = 1; string name = 2; }
+message EgressPolicy { ResourceMetadata metadata = 1; repeated EgressRule rules = 2; }
+message EgressRule { TlsPassthroughRule tls_passthrough = 3; }
+message TlsPassthroughRule { repeated string hostnames = 1; Ports ports = 2; }
 message Ports { repeated int32 numbers = 2; }
 message CreateActorEgressPolicyRequest { ObjectRef actor = 1; EgressPolicy egress_policy = 2; }
 `).root;
@@ -237,10 +243,12 @@ message CreateActorEgressPolicyRequest { ObjectRef actor = 1; EgressPolicy egres
 
 		const request = makeUnaryRequest.mock.calls[0][0];
 		const decoded = protocol
-			.lookupType('CreateActorEgressPolicyRequest')
+			.lookupType('substrate.ateapi.v1.CreateActorEgressPolicyRequest')
 			.decode(request.serialize(request.request));
-		expect(request.path).toBe('/ateapi.Control/CreateActorEgressPolicy');
-		expect(protocol.lookupType('CreateActorEgressPolicyRequest').toObject(decoded)).toMatchObject({
+		expect(request.path).toBe('/substrate.ateapi.v1.Control/CreateActorEgressPolicy');
+		expect(
+			protocol.lookupType('substrate.ateapi.v1.CreateActorEgressPolicyRequest').toObject(decoded),
+		).toMatchObject({
 			actor: { atespace: 'test-space', name: 'n8n-workspace' },
 			egressPolicy: {
 				metadata: { atespace: 'test-space', name: 'default' },
@@ -253,6 +261,38 @@ message CreateActorEgressPolicyRequest { ObjectRef actor = 1; EgressPolicy egres
 					},
 				],
 			},
+		});
+	});
+
+	it('suspends with synchronous snapshot durability', async () => {
+		const protocol = parse(`syntax = "proto3";
+package substrate.ateapi.v1;
+message ObjectRef { string atespace = 1; string name = 2; }
+enum DurabilityMode {
+  DURABILITY_MODE_UNSPECIFIED = 0;
+  DURABILITY_MODE_SYNCHRONOUS = 1;
+  DURABILITY_MODE_ASYNCHRONOUS = 2;
+}
+message SuspendOptions { DurabilityMode mode = 1; }
+message SuspendActorRequest { ObjectRef actor = 1; SuspendOptions options = 2; }
+`).root;
+		readFile.mockImplementation(async (path: string) =>
+			path.endsWith('ca.crt') ? Buffer.from('ca') : 'token',
+		);
+		const control = new SubstrateControl(connection, 1_000);
+
+		await control.call('SuspendActor', 'n8n-workspace');
+
+		const request = makeUnaryRequest.mock.calls[0][0];
+		const decoded = protocol
+			.lookupType('substrate.ateapi.v1.SuspendActorRequest')
+			.decode(request.serialize(request.request));
+		expect(request.path).toBe('/substrate.ateapi.v1.Control/SuspendActor');
+		expect(
+			protocol.lookupType('substrate.ateapi.v1.SuspendActorRequest').toObject(decoded),
+		).toMatchObject({
+			actor: { atespace: 'test-space', name: 'n8n-workspace' },
+			options: { mode: 1 },
 		});
 	});
 });

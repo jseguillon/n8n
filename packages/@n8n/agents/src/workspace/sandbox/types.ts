@@ -1,5 +1,9 @@
 import type { CreateSandboxFromImageParams } from '@daytona/sdk';
-import type { SandboxClient } from '@n8n/sandbox-client';
+import type {
+	FileEntry as SandboxClientFileEntry,
+	ListFilesOptions,
+	SandboxClient,
+} from '@n8n/sandbox-client';
 
 import type { BaseFilesystemOptions } from '../filesystem/base-filesystem';
 import type {
@@ -54,18 +58,26 @@ export type {
 
 export type SandboxProvider = 'daytona' | 'n8n-sandbox' | 'substrate';
 
-export type SandboxFileClient = Pick<
-	SandboxClient,
-	| 'readFile'
-	| 'writeFile'
-	| 'appendFile'
-	| 'deleteFile'
-	| 'copyFile'
-	| 'moveFile'
-	| 'mkdir'
-	| 'listFiles'
-	| 'stat'
->;
+export type SandboxFileClient = Omit<
+	Pick<
+		SandboxClient,
+		| 'readFile'
+		| 'writeFile'
+		| 'appendFile'
+		| 'deleteFile'
+		| 'copyFile'
+		| 'moveFile'
+		| 'mkdir'
+		| 'listFiles'
+		| 'stat'
+	>,
+	'listFiles'
+> & {
+	listFiles(
+		id: string,
+		options?: ListFilesOptions,
+	): Promise<Array<Pick<SandboxClientFileEntry, 'name' | 'size' | 'isDir'>>>;
+};
 
 export interface SandboxConfigBase {
 	provider: SandboxProvider;

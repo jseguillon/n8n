@@ -244,6 +244,7 @@ describe('InstanceAiVerificationService', () => {
 					template: 'test-template',
 					tokenFile: '/server/token',
 					caFile: '/server/ca',
+					routerCredentialFile: '/server/router-credential-bundle.pem',
 					serverName: 'api.example.test',
 				},
 			});
@@ -254,6 +255,7 @@ describe('InstanceAiVerificationService', () => {
 				substrateTemplate: 'test-template',
 				substrateTokenFile: '/run/secrets/substrate-token',
 				substrateCaFile: '/run/secrets/substrate-ca',
+				substrateRouterCredentialFile: '/run/secrets/router-credential-bundle.pem',
 				substrateServerName: 'substrate.example.test',
 			});
 			const workspace = {

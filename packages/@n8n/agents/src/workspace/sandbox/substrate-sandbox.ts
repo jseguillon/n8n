@@ -1,4 +1,5 @@
 import { SandboxServiceError } from '@n8n/sandbox-client';
+import { readFile } from 'node:fs/promises';
 import type {
 	CopyFileRequest,
 	DeleteFileOptions,
@@ -6,7 +7,8 @@ import type {
 	ListFilesOptions,
 	MoveFileRequest,
 } from '@n8n/sandbox-client';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { Agent } from 'undici';
 import { z } from 'zod';
 
 import { BaseSandbox } from './base-sandbox';
@@ -62,6 +64,9 @@ export class SubstrateSandbox extends BaseSandbox {
 	readonly id: string;
 	private readonly control: SubstrateControl;
 	private readonly timeout: number;
+	private routerAgent?: Agent;
+	private routerAgentPromise?: Promise<Agent>;
+	private routerAgentFingerprint?: string;
 
 	constructor(private readonly options: SubstrateSandboxOptions) {
 		super();
@@ -84,14 +89,22 @@ export class SubstrateSandbox extends BaseSandbox {
 
 	async stop(): Promise<void> {
 		if (this.options.ephemeral) {
-			await this.control.deleteActor(this.id);
+			try {
+				await this.control.deleteActor(this.id);
+			} finally {
+				await this.closeRouterAgent();
+			}
 			return;
 		}
 		await this.control.call('SuspendActor', this.id);
 	}
 
 	async destroy(): Promise<void> {
-		await this.control.deleteActor(this.id);
+		try {
+			await this.control.deleteActor(this.id);
+		} finally {
+			await this.closeRouterAgent();
+		}
 	}
 
 	getFileClient(abortSignal?: AbortSignal): SandboxFileClient {
@@ -124,11 +137,15 @@ export class SubstrateSandbox extends BaseSandbox {
 		url.search = new URLSearchParams(query).toString();
 		const headers = new Headers(init.headers);
 		headers.set('ate-target-actor', `${this.options.atespace}/${this.id}`);
+		const dispatcher = await this.getRouterAgent(url);
 		const response = await fetch(url, {
 			...init,
 			redirect: 'error',
 			headers,
 			signal: init.signal ?? AbortSignal.timeout(this.timeout),
+			// Node's fetch accepts the Undici dispatcher option for mTLS.
+			// @ts-expect-error dispatcher is a Node fetch extension
+			dispatcher,
 		});
 		if (!response.ok) {
 			await response.body?.cancel();
@@ -138,6 +155,52 @@ export class SubstrateSandbox extends BaseSandbox {
 			);
 		}
 		return response;
+	}
+
+	private async getRouterAgent(url: URL): Promise<Agent | undefined> {
+		if (url.protocol !== 'https:') return undefined;
+		const routerCredentialFile = this.options.routerCredentialFile;
+		if (!routerCredentialFile) {
+			throw new Error('A Substrate router client certificate file is required for HTTPS');
+		}
+		if (this.routerAgentPromise) return await this.routerAgentPromise;
+
+		const caFile = this.options.caFile;
+		if (!caFile) throw new Error('A Substrate router CA file is required for HTTPS');
+		this.routerAgentPromise = (async () => {
+			const [ca, credentialBundle] = await Promise.all([
+				readFile(caFile).catch(() => {
+					throw new Error('The server Substrate CA file could not be read');
+				}),
+				readFile(routerCredentialFile).catch(() => {
+					throw new Error('The server Substrate router credential file could not be read');
+				}),
+			]);
+			const fingerprint = createHash('sha256').update(ca).update(credentialBundle).digest('hex');
+			if (this.routerAgent && this.routerAgentFingerprint === fingerprint) return this.routerAgent;
+
+			const previous = this.routerAgent;
+			this.routerAgent = new Agent({
+				connect: { ca, cert: credentialBundle, key: credentialBundle },
+			});
+			this.routerAgentFingerprint = fingerprint;
+			if (previous) void previous.close().catch(() => undefined);
+			return this.routerAgent;
+		})();
+		try {
+			this.routerAgent = await this.routerAgentPromise;
+			return this.routerAgent;
+		} finally {
+			this.routerAgentPromise = undefined;
+		}
+	}
+
+	private async closeRouterAgent(): Promise<void> {
+		const agent = this.routerAgent ?? (await this.routerAgentPromise?.catch(() => undefined));
+		await agent?.close();
+		this.routerAgent = undefined;
+		this.routerAgentFingerprint = undefined;
+		this.routerAgentPromise = undefined;
 	}
 
 	override async executeCommand(

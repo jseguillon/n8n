@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SandboxServiceError } from '@n8n/sandbox-client';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { SubstrateControl } from '../workspace/sandbox/substrate-control';
 import { SubstrateSandbox } from '../workspace/sandbox/substrate-sandbox';
@@ -104,6 +107,62 @@ describe('Substrate sandbox daemon protocol', () => {
 			expect.any(URL),
 			expect.objectContaining({ redirect: 'error' }),
 		);
+	});
+
+	it('uses the server PodIdentity bundle for HTTPS router requests', async () => {
+		const directory = await mkdtemp(join(tmpdir(), 'n8n-substrate-router-'));
+		try {
+			const caFile = join(directory, 'ca.pem');
+			const routerCredentialFile = join(directory, 'router-credential-bundle.pem');
+			await writeFile(caFile, 'test-ca');
+			await writeFile(routerCredentialFile, 'test-router-credential');
+			const fetch = vi.fn().mockResolvedValue(new Response('ok'));
+			vi.stubGlobal('fetch', fetch);
+			vi.spyOn(SubstrateControl.prototype, 'deleteActor').mockResolvedValue();
+			const sandbox = new SubstrateSandbox({
+				...connection,
+				routerUrl: 'https://router.example.test',
+				caFile,
+				routerCredentialFile,
+			});
+
+			const request = (
+				sandbox as unknown as {
+					request: (path: string) => Promise<Response>;
+				}
+			).request.bind(sandbox);
+
+			await request('/healthz');
+			expect(fetch.mock.calls[0][1]).toHaveProperty('dispatcher');
+			const initialDispatcher = (fetch.mock.calls[0][1] as RequestInit & { dispatcher: unknown })
+				.dispatcher;
+			await writeFile(routerCredentialFile, 'rotated-router-credential');
+			await request();
+			const rotatedDispatcher = (fetch.mock.calls[1][1] as RequestInit & { dispatcher: unknown })
+				.dispatcher;
+			expect(rotatedDispatcher).not.toBe(initialDispatcher);
+			await sandbox.destroy();
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+	});
+
+	it('requires a router client certificate for HTTPS', async () => {
+		const fetch = vi.fn();
+		vi.stubGlobal('fetch', fetch);
+		const sandbox = new SubstrateSandbox({
+			...connection,
+			routerUrl: 'https://router.example.test',
+		});
+
+		await expect(
+			(
+				sandbox as unknown as {
+					request: (path: string) => Promise<Response>;
+				}
+			).request('/healthz'),
+		).rejects.toThrow('router client certificate file is required');
+		expect(fetch).not.toHaveBeenCalled();
 	});
 
 	it('reads split execution events and rejects incomplete streams', async () => {
