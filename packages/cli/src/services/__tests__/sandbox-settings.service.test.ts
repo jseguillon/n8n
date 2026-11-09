@@ -72,6 +72,7 @@ describe('SandboxSettingsService', () => {
 			Object.assign(globalConfig.instanceAi, {
 				substrateTokenFile: '',
 				substrateCaFile: '',
+				substrateRouterCredentialFile: '/server/router-credential-bundle.pem',
 				substrateEndpoint: '',
 				substrateRouterUrl: '',
 				substrateAtespace: '',
@@ -98,6 +99,7 @@ describe('SandboxSettingsService', () => {
 					token: 'fixture-token',
 					tokenFile: '',
 					caFile: '',
+					routerCredentialFile: '/server/router-credential-bundle.pem',
 					serverName: 'api.example.test',
 				},
 			});
@@ -110,6 +112,7 @@ describe('SandboxSettingsService', () => {
 			Object.assign(globalConfig.instanceAi, {
 				substrateTokenFile: '/server/token',
 				substrateCaFile: '/server/ca',
+				substrateRouterCredentialFile: '/server/router-credential-bundle.pem',
 			});
 			vi.stubEnv('SUBSTRATE_SERVER_NAME', 'private-control.example.test');
 			await expect(
@@ -118,6 +121,7 @@ describe('SandboxSettingsService', () => {
 				connection: {
 					tokenFile: '/server/token',
 					caFile: '/server/ca',
+					routerCredentialFile: '/server/router-credential-bundle.pem',
 					serverName: 'private-control.example.test',
 					token: '',
 				},
@@ -137,6 +141,7 @@ describe('SandboxSettingsService', () => {
 			{ atespace: '../other-space' },
 			{ tokenFile: '/unexpected/file' },
 			{ caFile: '/unexpected/ca' },
+			{ routerCredentialFile: '/unexpected/router-identity.pem' },
 			{ serverName: 'unexpected.example.test' },
 		])('rejects invalid or server-only fields: %j', async (invalid) => {
 			await expect(
@@ -153,6 +158,7 @@ describe('SandboxSettingsService', () => {
 				substrateTemplate: data.template,
 				substrateTokenFile: '/server/token',
 				substrateCaFile: '/server/ca',
+				substrateRouterCredentialFile: '/server/router-credential-bundle.pem',
 				substrateServerName: 'api.example.test',
 			});
 			const managed = new SandboxSettingsService(

@@ -88,6 +88,7 @@ export function resolveSandboxConfig(env: NodeJS.ProcessEnv): SandboxConfig {
 			template: env.SUBSTRATE_ACTOR_TEMPLATE ?? '',
 			tokenFile: env.SUBSTRATE_TOKEN_FILE ?? '',
 			caFile: env.SUBSTRATE_CA_FILE ?? '',
+			routerCredentialFile: env.SUBSTRATE_ROUTER_CREDENTIAL_FILE ?? '',
 			serverName: env.SUBSTRATE_SERVER_NAME ?? 'api.ate-system.svc',
 		};
 		const missing = [
@@ -97,6 +98,7 @@ export function resolveSandboxConfig(env: NodeJS.ProcessEnv): SandboxConfig {
 			['SUBSTRATE_ACTOR_TEMPLATE', connection.template],
 			['SUBSTRATE_TOKEN_FILE', connection.tokenFile],
 			['SUBSTRATE_CA_FILE', connection.caFile],
+			['SUBSTRATE_ROUTER_CREDENTIAL_FILE', connection.routerCredentialFile],
 		]
 			.filter(([, value]) => !value.trim())
 			.map(([name]) => name);

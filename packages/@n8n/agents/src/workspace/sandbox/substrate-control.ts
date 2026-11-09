@@ -11,19 +11,33 @@ export interface SubstrateConnection {
 	/** Static bearer credential. A server-mounted token file takes precedence. */
 	token?: string;
 	caFile: string;
+	routerCredentialFile?: string;
 	serverName: string;
 }
 
-// Wire-compatible subset of Substrate v0.4 ateapi.proto (Apache-2.0).
-// https://github.com/agent-substrate/substrate/blob/v0.4.0/pkg/proto/ateapipb/ateapi.proto
+// Wire-compatible subset of the Substrate v1 Control API (Apache-2.0).
+// https://github.com/agent-substrate/substrate/blob/v1.0.0/api/ateapi/v1/ateapi.proto
+const API_PACKAGE = 'substrate.ateapi.v1';
 const PROTOCOL = `syntax = "proto3";
+package ${API_PACKAGE};
 message ObjectRef { string atespace = 1; string name = 2; }
-message Actor { ObjectRef metadata = 1; ObjectRef actor_template = 4; }
+message ResourceMetadata { string atespace = 1; string name = 2; }
+message Actor { ResourceMetadata metadata = 1; ObjectRef actor_template = 2; }
 message CreateActorRequest { Actor actor = 1; }
-message ActorRequest { ObjectRef actor = 1; bool any_state = 2; }
-message EgressPolicy { ObjectRef metadata = 1; repeated EgressRule rules = 2; }
-message EgressRule { TLSPassthroughRule tls_passthrough = 3; }
-message TLSPassthroughRule { repeated string hostnames = 1; Ports ports = 2; }
+message GetActorRequest { ObjectRef actor = 1; }
+enum DurabilityMode {
+  DURABILITY_MODE_UNSPECIFIED = 0;
+  DURABILITY_MODE_SYNCHRONOUS = 1;
+  DURABILITY_MODE_ASYNCHRONOUS = 2;
+}
+message SuspendOptions { DurabilityMode mode = 1; }
+message SuspendActorRequest { ObjectRef actor = 1; SuspendOptions options = 2; }
+message ResumeActorRequest { ObjectRef actor = 1; }
+message DeleteOptions { int64 version = 1; string uid = 2; }
+message DeleteActorRequest { ObjectRef actor = 1; DeleteOptions options = 2; }
+message EgressPolicy { ResourceMetadata metadata = 1; repeated EgressRule rules = 2; }
+message EgressRule { TlsPassthroughRule tls_passthrough = 3; }
+message TlsPassthroughRule { repeated string hostnames = 1; Ports ports = 2; }
 message Ports { repeated int32 numbers = 2; }
 message CreateActorEgressPolicyRequest { ObjectRef actor = 1; EgressPolicy egress_policy = 2; }
 `;
@@ -53,11 +67,13 @@ export class SubstrateControl {
 			| 'CreateActorEgressPolicy',
 		name: string,
 	): Promise<unknown> {
-		const [{ Client, credentials, Metadata }, { parse }] = await Promise.all([
+		const [{ Client, credentials, Metadata }, protobufjs] = await Promise.all([
 			import('@grpc/grpc-js'),
 			import('protobufjs'),
 		]);
-		const schema = (protocol ??= parse(PROTOCOL).root);
+		// Handle protobufjs as the ESM default and the CommonJS namespace.
+		const protobuf = protobufjs.default ?? protobufjs;
+		const schema = (protocol ??= protobuf.parse(PROTOCOL).root);
 		const c = this.connection;
 		const [ca, token] = await Promise.all([
 			c.caFile
@@ -79,13 +95,13 @@ export class SubstrateControl {
 		const metadata = new Metadata();
 		metadata.set('authorization', `Bearer ${token.trim()}`);
 		const ref = { atespace: c.atespace, name };
-		const type = schema.lookupType(
+		const requestType =
 			method === 'CreateActor'
 				? 'CreateActorRequest'
 				: method === 'CreateActorEgressPolicy'
 					? 'CreateActorEgressPolicyRequest'
-					: 'ActorRequest',
-		);
+					: `${method}Request`;
+		const type = schema.lookupType(`${API_PACKAGE}.${requestType}`);
 		const request =
 			method === 'CreateActor'
 				? { actor: { metadata: ref, actorTemplate: { atespace: c.atespace, name: c.template } } }
@@ -104,15 +120,19 @@ export class SubstrateControl {
 								],
 							},
 						}
-					: { actor: ref, ...(method === 'DeleteActor' ? { anyState: true } : {}) };
+					: method === 'SuspendActor'
+						? { actor: ref, options: { mode: 1 } }
+						: { actor: ref };
 		try {
 			return await new Promise<unknown>((resolve, reject) => {
 				client.makeUnaryRequest(
-					`/ateapi.Control/${method}`,
+					`/${API_PACKAGE}.Control/${method}`,
 					(value: object) => Buffer.from(type.encode(type.fromObject(value)).finish()),
 					(buffer: Buffer) =>
 						method === 'GetActor'
-							? schema.lookupType('Actor').toObject(schema.lookupType('Actor').decode(buffer))
+							? schema
+									.lookupType(`${API_PACKAGE}.Actor`)
+									.toObject(schema.lookupType(`${API_PACKAGE}.Actor`).decode(buffer))
 							: undefined,
 					request,
 					metadata,

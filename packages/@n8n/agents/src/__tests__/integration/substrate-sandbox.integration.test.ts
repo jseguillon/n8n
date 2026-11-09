@@ -10,6 +10,7 @@ const connection = {
 	template: process.env.SUBSTRATE_ACTOR_TEMPLATE ?? '',
 	tokenFile: process.env.SUBSTRATE_TOKEN_FILE ?? '',
 	caFile: process.env.SUBSTRATE_CA_FILE ?? '',
+	routerCredentialFile: process.env.SUBSTRATE_ROUTER_CREDENTIAL_FILE ?? '',
 	serverName: process.env.SUBSTRATE_SERVER_NAME ?? 'api.ate-system.svc',
 };
 

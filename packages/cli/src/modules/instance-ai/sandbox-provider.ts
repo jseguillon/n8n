@@ -12,11 +12,12 @@ export function substrateSandboxConfig(config: InstanceAiConfig): SubstrateSandb
 		template: config.substrateTemplate,
 		tokenFile: config.substrateTokenFile,
 		caFile: config.substrateCaFile,
+		routerCredentialFile: config.substrateRouterCredentialFile,
 		serverName: config.substrateServerName,
 	};
 	if (Object.values(connection).some((value) => !value?.trim())) {
 		throw new OperationalError(
-			'Configure the SUBSTRATE_API_ENDPOINT, SUBSTRATE_ROUTER_URL, SUBSTRATE_ATESPACE, SUBSTRATE_ACTOR_TEMPLATE, SUBSTRATE_TOKEN_FILE and SUBSTRATE_CA_FILE environment variables.',
+			'Configure the SUBSTRATE_API_ENDPOINT, SUBSTRATE_ROUTER_URL, SUBSTRATE_ATESPACE, SUBSTRATE_ACTOR_TEMPLATE, SUBSTRATE_TOKEN_FILE, SUBSTRATE_CA_FILE and SUBSTRATE_ROUTER_CREDENTIAL_FILE environment variables.',
 		);
 	}
 	return {
