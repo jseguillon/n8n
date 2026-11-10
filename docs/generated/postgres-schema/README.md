@@ -159,6 +159,7 @@ Auto-generated from the PostgreSQL migrations in @n8n/db. Do not edit by hand.
 | [public.skill_source](public.skill_source.md) | 15 |  | BASE TABLE |
 | [public.skill_source_link](public.skill_source_link.md) | 14 |  | BASE TABLE |
 | [public.skill_version](public.skill_version.md) | 12 |  | BASE TABLE |
+| [public.substrate_actor_activity](public.substrate_actor_activity.md) | 9 |  | BASE TABLE |
 | [public.tag_entity](public.tag_entity.md) | 4 |  | BASE TABLE |
 | [public.test_case_execution](public.test_case_execution.md) | 14 |  | BASE TABLE |
 | [public.test_run](public.test_run.md) | 16 |  | BASE TABLE |
@@ -2066,6 +2067,17 @@ erDiagram
   varchar_255_ sourceRevision
   timestamp_3__with_time_zone updatedAt
   integer version
+}
+"public.substrate_actor_activity" {
+  varchar_63_ actorId
+  double_precision autoDeleteMinutes
+  double_precision autoStopMinutes
+  varchar_64_ connectionFingerprint
+  timestamp_3__with_time_zone createdAt
+  boolean ephemeral
+  timestamp_3__with_time_zone lastActivityAt
+  timestamp_3__with_time_zone lastSuspendedAt
+  timestamp_3__with_time_zone updatedAt
 }
 "public.tag_entity" {
   timestamp_3__with_time_zone createdAt

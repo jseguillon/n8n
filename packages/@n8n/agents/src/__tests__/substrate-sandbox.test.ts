@@ -36,6 +36,17 @@ describe('Substrate sandbox daemon protocol', () => {
 		expect(deleteActor).toHaveBeenCalledWith(ephemeral.id);
 	});
 
+	it('clears persisted activity after deleting an Actor', async () => {
+		const deleteActor = vi.spyOn(SubstrateControl.prototype, 'deleteActor').mockResolvedValue();
+		const onDestroyed = vi.fn().mockResolvedValue(undefined);
+		const sandbox = new SubstrateSandbox({ ...connection, id: 'test-actor', onDestroyed });
+
+		await sandbox.destroy();
+
+		expect(deleteActor).toHaveBeenCalledWith('n8n-test-actor');
+		expect(onDestroyed).toHaveBeenCalledWith('n8n-test-actor');
+	});
+
 	it('maps daemon file metadata to the shared filesystem contract', async () => {
 		const fetch = vi
 			.fn()
@@ -90,6 +101,19 @@ describe('Substrate sandbox daemon protocol', () => {
 		await sandbox.readFile(sandbox.id, '/home/user/check.txt', signal);
 
 		expect(fetch).toHaveBeenCalledWith(expect.any(URL), expect.objectContaining({ signal }));
+	});
+
+	it('records Actor activity before and after router requests', async () => {
+		const fetch = vi.fn().mockResolvedValue(new Response('ok'));
+		const onActivity = vi.fn().mockResolvedValue(undefined);
+		vi.stubGlobal('fetch', fetch);
+		const sandbox = new SubstrateSandbox({ ...connection, id: 'test-actor', onActivity });
+
+		await sandbox.readFile(sandbox.id, '/home/user/check.txt');
+
+		expect(onActivity).toHaveBeenCalledTimes(2);
+		expect(onActivity).toHaveBeenNthCalledWith(1, 'n8n-test-actor');
+		expect(onActivity).toHaveBeenNthCalledWith(2, 'n8n-test-actor');
 	});
 
 	it('does not allow request headers to override the target Actor', async () => {

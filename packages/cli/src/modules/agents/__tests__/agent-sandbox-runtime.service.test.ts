@@ -10,6 +10,7 @@ import { mock } from 'vitest-mock-extended';
 import type { InstanceSettings } from 'n8n-core';
 
 import type { SandboxSettingsService } from '../../../services/sandbox-settings.service';
+import type { SubstrateActorLifecycleService } from '../../../services/substrate-actor-lifecycle.service';
 
 import type { ProjectAgent } from '../entities/agent.entity';
 import { hashAgentSandboxPrincipal } from '../agent-sandbox-principal';
@@ -72,7 +73,7 @@ function makeSandboxSettingsService(
 		serviceUrl: 'https://sandbox.example',
 		apiKey: 'sandbox-key',
 	});
-	service.getSubstrateConfig.mockReturnValue({
+	service.getSubstrateConfig.mockResolvedValue({
 		enabled: true,
 		provider: 'substrate',
 		connection: {
@@ -94,12 +95,16 @@ function makeService({
 	instanceSettings = mock<InstanceSettings>({ instanceId }),
 	agentRepository = makeAgentRepository(),
 	sandboxSettingsService = makeSandboxSettingsService(),
+	substrateActorLifecycle = mock<SubstrateActorLifecycleService>({
+		createActivityRecorder: vi.fn(() => async () => {}),
+	}),
 }: {
 	configOverrides?: Partial<AgentsConfig>;
 	logger?: Logger;
 	instanceSettings?: InstanceSettings;
 	agentRepository?: AgentRepository;
 	sandboxSettingsService?: SandboxSettingsService;
+	substrateActorLifecycle?: SubstrateActorLifecycleService;
 } = {}): AgentSandboxRuntimeService {
 	return new AgentSandboxRuntimeService(
 		{
@@ -108,12 +113,17 @@ function makeService({
 			sandboxSnapshot: '',
 			sandboxTimeout: 300_000,
 			sandboxEphemeral: false,
+			sandboxWorkspaceAutoStopMinutes: 5,
+			sandboxWorkspaceAutoDeleteMinutes: 24 * 60,
+			sandboxKnowledgeAutoStopMinutes: 15,
+			sandboxKnowledgeAutoDeleteMinutes: 7 * 24 * 60,
 			...configOverrides,
 		} as AgentsConfig,
 		logger,
 		instanceSettings,
 		agentRepository,
 		sandboxSettingsService,
+		substrateActorLifecycle,
 	);
 }
 
@@ -303,6 +313,28 @@ describe('AgentSandboxRuntimeService', () => {
 		);
 	});
 
+	it('records persistent Substrate Actor activity with each sandbox policy', async () => {
+		const recordActivity = vi.fn(async () => {});
+		const substrateActorLifecycle = mock<SubstrateActorLifecycleService>({
+			createActivityRecorder: vi.fn(() => recordActivity),
+		});
+		const service = makeService({
+			sandboxSettingsService: makeSandboxSettingsService('substrate'),
+			substrateActorLifecycle,
+		});
+
+		await service.acquireWorkspaceSandbox(projectId, agentId, principalHash);
+		const config = createSandboxMock.mock.calls[0][0];
+		if (config.provider !== 'substrate') throw new Error('Expected Substrate config');
+		await config.onActivity?.('n8n-workspace-actor');
+
+		expect(substrateActorLifecycle.createActivityRecorder).toHaveBeenCalledWith(
+			expect.objectContaining({ atespace: 'n8n', template: 'sandbox' }),
+			{ autoStopMinutes: 5, autoDeleteMinutes: 24 * 60, ephemeral: false },
+		);
+		expect(recordActivity).toHaveBeenCalledWith('n8n-workspace-actor');
+	});
+
 	it('marks the n8n sandbox knowledge sandbox ephemeral when configured, but never the workspace', async () => {
 		const service = makeService({
 			configOverrides: { sandboxEphemeral: true },
@@ -315,18 +347,31 @@ describe('AgentSandboxRuntimeService', () => {
 		expect(createSandboxMock.mock.calls.map(([config]) => config.ephemeral)).toEqual([false, true]);
 	});
 
-	it('rejects ephemeral Substrate knowledge Actors until an external cleanup controller is configured', async () => {
+	it('uses the idle lifecycle settings for ephemeral Substrate knowledge Actors', async () => {
+		const recordActivity = vi.fn(async () => {});
+		const substrateActorLifecycle = mock<SubstrateActorLifecycleService>({
+			createActivityRecorder: vi.fn(() => recordActivity),
+		});
 		const service = makeService({
 			configOverrides: { sandboxEphemeral: true },
 			sandboxSettingsService: makeSandboxSettingsService('substrate'),
+			substrateActorLifecycle,
 		});
 
 		await service.acquireWorkspaceSandbox(projectId, agentId, principalHash);
-		await expect(service.acquireKnowledgeSandbox(projectId, agentId)).rejects.toThrow(
-			'N8N_AGENTS_AI_SANDBOX_EPHEMERAL',
-		);
+		await service.acquireKnowledgeSandbox(projectId, agentId);
 
-		expect(createSandboxMock.mock.calls.map(([config]) => config.ephemeral)).toEqual([false]);
+		expect(createSandboxMock.mock.calls.map(([config]) => config.ephemeral)).toEqual([false, true]);
+		expect(createSandboxMock.mock.calls[1][0]).toEqual(
+			expect.objectContaining({
+				ephemeral: true,
+				onActivity: expect.any(Function),
+			}),
+		);
+		expect(substrateActorLifecycle.createActivityRecorder).toHaveBeenCalledWith(
+			expect.objectContaining({ atespace: 'n8n', template: 'sandbox' }),
+			{ autoStopMinutes: 15, autoDeleteMinutes: -1, ephemeral: true },
+		);
 	});
 
 	it('reports how to configure a missing n8n sandbox service URL', async () => {

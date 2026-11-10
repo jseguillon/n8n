@@ -1,6 +1,6 @@
 # Substrate sandbox
 
-The `substrate` provider uses the Substrate v0.4 control API to manage Actors.
+The `substrate` provider uses the Substrate v1 Control API to manage Actors.
 It sends commands and file requests through `atenet-router`.
 Each sandbox uses an Actor in the configured Atespace and ActorTemplate.
 
@@ -8,8 +8,8 @@ Each sandbox uses an Actor in the configured Atespace and ActorTemplate.
 
 Use **Settings > Agents > Shared sandbox** to enter the control endpoint,
 router URL, Atespace, ActorTemplate, and optional static access token. The UI
-verifies and saves a `substrateApi` instance credential. Server-owned TLS trust
-and renewable token files stay outside the form. See the
+verifies and saves a `substrateApi` instance credential. Server-owned TLS trust,
+router credentials, and renewable token files stay outside the form. See the
 [UI configuration guide](../../../../docs/substrate-ui-configuration.md) for
 the full field boundary and precedence rules.
 
@@ -20,16 +20,21 @@ Set these server environment variables:
 | Variable | Value |
 | --- | --- |
 | `SUBSTRATE_API_ENDPOINT` | gRPC host and port, without a URL scheme |
-| `SUBSTRATE_ROUTER_URL` | Private HTTP or HTTPS router URL |
+| `SUBSTRATE_ROUTER_URL` | Private HTTPS router URL |
 | `SUBSTRATE_ATESPACE` | Atespace name |
 | `SUBSTRATE_ACTOR_TEMPLATE` | Template name in that Atespace |
 | `SUBSTRATE_TOKEN_FILE` | Path to a mounted bearer token file |
 | `SUBSTRATE_CA_FILE` | Path to the control API CA bundle |
+| `SUBSTRATE_ROUTER_CREDENTIAL_FILE` | Path to a mounted PodIdentity PEM bundle for router mTLS |
 | `SUBSTRATE_SERVER_NAME` | TLS server name; defaults to `api.ate-system.svc` |
 
 Mount the token and CA files read-only. The n8n user must be able to read them.
+Mount a projected PodIdentity credential bundle for the n8n service account.
+Allow that SPIFFE ID in the Substrate router ingress list.
 Use a token whose audience and issuer match the control API configuration.
 Rotate the token before it expires. The client reads it for each control API call.
+The router credential stays deployment-managed, even when you enter a static
+Control API token in the UI.
 Keep the router private. Grant the control identity access only to its Atespace.
 
 Leave `N8N_INSTANCE_AI_SANDBOX_PROVIDER` unset to select **Agent Substrate** in
@@ -56,17 +61,27 @@ UI connection. The server-owned file and TLS settings are never credential data.
 
 ## Lifecycle
 
-`stop()` suspends persistent Actors. It deletes ephemeral Actors. A router request
-can wake a suspended Actor and restore its state. `destroy()` deletes it.
+`stop()` synchronously suspends persistent Actors and waits for a durable
+snapshot. It deletes ephemeral Actors. A router request can wake a suspended
+Actor and restore its state. `destroy()` deletes it.
 Verification workspaces are deleted after the probe.
 Agent workspaces use the existing project, Agent, and principal identity.
 Assistant workspaces use a thread-derived identity.
-Substrate does not implement the Daytona idle timers in n8n. Use an external idle
-controller to suspend inactive persistent Actors. Instance AI deletes its own
-ephemeral Actors at cache expiry. Agent knowledge sandboxes reject
-`N8N_AGENTS_AI_SANDBOX_EPHEMERAL=true` until an external cleanup controller is
-available for their deterministic Actor identities. This version does not expose
-a setting to enable ephemeral Agent sandboxes with an external controller.
+n8n records Substrate Actor activity in its database. A cluster-leader task
+suspends idle persistent Actors and deletes them after their stopped retention
+interval. It runs once per minute and covers Instance AI and Agent Actors.
+
+Instance AI uses `N8N_INSTANCE_AI_SANDBOX_AUTO_STOP_MINUTES` (default 15) and
+`N8N_INSTANCE_AI_SANDBOX_AUTO_DELETE_MINUTES` (default 10080). Agent workspaces
+use `N8N_AGENTS_AI_SANDBOX_WORKSPACE_AUTO_STOP_MINUTES` (default 5) and
+`N8N_AGENTS_AI_SANDBOX_WORKSPACE_AUTO_DELETE_MINUTES` (default 1440). Agent
+knowledge sandboxes use `N8N_AGENTS_AI_SANDBOX_KNOWLEDGE_AUTO_STOP_MINUTES`
+(default 15) and `N8N_AGENTS_AI_SANDBOX_KNOWLEDGE_AUTO_DELETE_MINUTES` (default
+10080). Set an auto-stop value to `0` to disable automatic suspension. Set an
+auto-delete value to a negative number to keep suspended Actor files. Set it to
+`0` to delete an Actor when it is suspended. Ephemeral Agent knowledge Actors
+are deleted at the auto-stop interval. Daytona auto-archive does not apply to
+Substrate.
 
 The ActorTemplate router target must match the daemon listen port and prepare
 `/home/user/workspace`. Commands run under the daemon's configured user.

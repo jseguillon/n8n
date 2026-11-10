@@ -114,6 +114,22 @@ export class AgentsConfig {
 	@Env('N8N_AGENTS_AI_SANDBOX_EPHEMERAL')
 	sandboxEphemeral: boolean = false;
 
+	/** Minutes an idle Daytona or Substrate Agent workspace waits before it is stopped. `0` disables auto-stop. The n8n sandbox service uses its own idle settings. */
+	@Env('N8N_AGENTS_AI_SANDBOX_WORKSPACE_AUTO_STOP_MINUTES')
+	sandboxWorkspaceAutoStopMinutes: number = 5;
+
+	/** Minutes a stopped Daytona or suspended Substrate Agent workspace waits before it is deleted. A negative value disables auto-delete; `0` deletes on stop. The n8n sandbox service uses its own idle settings. */
+	@Env('N8N_AGENTS_AI_SANDBOX_WORKSPACE_AUTO_DELETE_MINUTES')
+	sandboxWorkspaceAutoDeleteMinutes: number = 24 * 60;
+
+	/** Minutes an idle Daytona or Substrate Agent knowledge sandbox waits before it is stopped. `0` disables auto-stop. The n8n sandbox service uses its own idle settings. */
+	@Env('N8N_AGENTS_AI_SANDBOX_KNOWLEDGE_AUTO_STOP_MINUTES')
+	sandboxKnowledgeAutoStopMinutes: number = 15;
+
+	/** Minutes a stopped Daytona or suspended Substrate Agent knowledge sandbox waits before it is deleted. A negative value disables auto-delete; `0` deletes on stop. The n8n sandbox service uses its own idle settings. */
+	@Env('N8N_AGENTS_AI_SANDBOX_KNOWLEDGE_AUTO_DELETE_MINUTES')
+	sandboxKnowledgeAutoDeleteMinutes: number = 7 * 24 * 60;
+
 	/**
 	 * Largest file, in megabytes, that an agent can store from a tool result or from its
 	 * sandbox. n8n skips a larger file and tells the agent.

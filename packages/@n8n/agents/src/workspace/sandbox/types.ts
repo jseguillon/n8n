@@ -134,6 +134,10 @@ export interface SubstrateSandboxConfig extends EnabledSandboxConfigBase {
 	provider: 'substrate';
 	id?: string;
 	connection: import('./substrate-control').SubstrateConnection;
+	/** Persist the last use of an Actor so a host lifecycle task can reclaim it. */
+	onActivity?: (actorId: string) => Promise<void>;
+	/** Remove persisted activity after the Actor is deleted. */
+	onDestroyed?: (actorId: string) => Promise<void>;
 }
 
 export type SandboxConfig =

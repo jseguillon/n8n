@@ -1,5 +1,5 @@
 import { N8N_CHAT_INTEGRATION_TYPE } from '@n8n/api-types';
-import { Logger } from '@n8n/backend-common';
+import { Logger, ModuleRegistry } from '@n8n/backend-common';
 import { AgentsConfig, GlobalConfig } from '@n8n/config';
 import { Container } from '@n8n/di';
 import { InstanceSettings } from 'n8n-core';
@@ -14,6 +14,7 @@ import {
 } from '@n8n/backend-services';
 import { SandboxSettingsService } from '@/services/sandbox-settings.service';
 import { ServiceAccountProjects } from '@/services/service-account-projects';
+import { SubstrateActorCleanupTask } from '@/services/substrate-actor-cleanup.task';
 import { AgentUsageProviderProxy } from '@/modules/workflow-index/agent-usage-provider-proxy.service';
 import { KnowledgeSandboxProviderProxy } from '@/modules/knowledge/knowledge-sandbox-provider-proxy';
 import { SkillUsageProxy } from '@/modules/skills';
@@ -139,9 +140,12 @@ function setUpContainerForInit() {
 
 describe('AgentsModule', () => {
 	let module: AgentsModule;
+	let moduleRegistry: ModuleRegistry;
 
 	beforeEach(() => {
 		Container.reset();
+		moduleRegistry = mock<ModuleRegistry>({ isActive: () => false });
+		Container.set(ModuleRegistry, moduleRegistry);
 		Container.set(
 			AgentsSettingsService,
 			mock<AgentsSettingsService>({ getEnabled: async () => true }),
@@ -157,6 +161,7 @@ describe('AgentsModule', () => {
 				AgentCheckpointPruningTask,
 				AgentInterruptedExecutionSweepTask,
 				AgentChannelMediaRetentionTask,
+				SubstrateActorCleanupTask,
 				AgentKnowledgeSnapshotTask,
 			]);
 		});
@@ -168,7 +173,16 @@ describe('AgentsModule', () => {
 				AgentCheckpointPruningTask,
 				AgentInterruptedExecutionSweepTask,
 				AgentChannelMediaRetentionTask,
+				SubstrateActorCleanupTask,
 			]);
+		});
+
+		it('leaves Substrate cleanup to Instance AI when that module is active', async () => {
+			moduleRegistry = mock<ModuleRegistry>({ isActive: () => true });
+			Container.set(ModuleRegistry, moduleRegistry);
+			Container.set(GlobalConfig, mock<GlobalConfig>({ diagnostics: { enabled: false } }));
+
+			await expect(module.systemTasks()).resolves.not.toContain(SubstrateActorCleanupTask);
 		});
 	});
 

@@ -77,6 +77,7 @@ import {
 import { Scope } from './scope';
 import { SecretsProviderConnection } from './secrets-provider-connection';
 import { Settings } from './settings';
+import { SubstrateActorActivity } from './substrate-actor-activity';
 import { SharedCredentials } from './shared-credentials';
 import { SharedWorkflow } from './shared-workflow';
 import { TagEntity } from './tag-entity';
@@ -155,6 +156,7 @@ export {
 	PollerState,
 	ProcessedData,
 	Settings,
+	SubstrateActorActivity,
 	AiPreference,
 	Variables,
 	ApiKey,
@@ -255,6 +257,7 @@ export const entities = {
 	PollerState,
 	ProcessedData,
 	Settings,
+	SubstrateActorActivity,
 	AiPreference,
 	Variables,
 	ApiKey,

@@ -55,6 +55,7 @@ const fakeUser = { id: 'user-1' } as User;
 type Overrides = {
 	resolveTracingConfig?: InstanceAiSandboxServiceOptions['resolveTracingConfig'];
 	identityScheme?: InstanceAiSandboxServiceOptions['identityScheme'];
+	onSubstrateActivity?: InstanceAiSandboxServiceOptions['onSubstrateActivity'];
 	config?: Partial<InstanceAiConfig>;
 	runState?: Partial<InstanceAiSandboxRunState>;
 	backgroundTasks?: Partial<InstanceAiSandboxBackgroundTasks>;
@@ -94,6 +95,7 @@ function createSandboxService(overrides: Overrides = {}) {
 		aiService,
 		resolveTracingConfig: overrides.resolveTracingConfig,
 		identityScheme: overrides.identityScheme,
+		onSubstrateActivity: overrides.onSubstrateActivity,
 	};
 	const service = new InstanceAiSandboxService(options);
 	return { service, logger, errorReporter, runState, backgroundTasks, settingsService, aiService };
@@ -109,6 +111,40 @@ describe('InstanceAiSandboxService', () => {
 	});
 
 	describe('config resolution', () => {
+		it('records persistent Substrate Actor activity with the configured lifecycle windows', async () => {
+			const onSubstrateActivity = vi.fn(async () => {});
+			const { service } = createSandboxService({
+				config: {
+					sandboxEnabled: true,
+					sandboxProvider: 'substrate',
+					sandboxEphemeral: false,
+					sandboxAutoStopMinutes: 15,
+					sandboxAutoDeleteMinutes: 10_080,
+					substrateEndpoint: 'api.ate-system.svc:443',
+					substrateRouterUrl: 'https://router.example',
+					substrateAtespace: 'n8n',
+					substrateTemplate: 'sandbox',
+					substrateTokenFile: '/run/secrets/token',
+					substrateCaFile: '/run/secrets/ca.crt',
+					substrateRouterCredentialFile: '/run/secrets/router-credential-bundle.pem',
+					substrateServerName: 'api.ate-system.svc',
+				},
+				onSubstrateActivity,
+			});
+
+			const config = service.getSandboxConfigFromEnv();
+			expect(config.provider).toBe('substrate');
+			if (!config.enabled || config.provider !== 'substrate')
+				throw new Error('Expected Substrate config');
+			await config.onActivity?.('n8n-test-actor');
+
+			expect(onSubstrateActivity).toHaveBeenCalledWith(
+				'n8n-test-actor',
+				expect.objectContaining({ atespace: 'n8n', template: 'sandbox' }),
+				{ autoStopMinutes: 15, autoDeleteMinutes: 10_080, ephemeral: false },
+			);
+		});
+
 		it('returns a disabled config when sandboxes are not enabled', async () => {
 			const { service } = createSandboxService({
 				config: { sandboxEnabled: false, sandboxProvider: 'daytona', sandboxTimeout: 42 },

@@ -3,6 +3,7 @@ import { Container } from '@n8n/di';
 import { mock } from 'vitest-mock-extended';
 
 import { InstanceAiCheckpointPruningTask } from '../instance-ai-checkpoint-pruning.task';
+import { SubstrateActorCleanupTask } from '@/services/substrate-actor-cleanup.task';
 import { InstanceAiModule } from '../instance-ai.module';
 import { SelfHealingConfigurationSnapshotTask } from '../self-healing/self-healing-configuration-snapshot.task';
 import { SelfHealingReconciliationTask } from '../self-healing/self-healing-reconciliation.task';
@@ -20,7 +21,11 @@ describe('InstanceAiModule', () => {
 
 		const tasks = await new InstanceAiModule().systemTasks();
 
-		expect(tasks).toEqual([SelfHealingReconciliationTask, InstanceAiCheckpointPruningTask]);
+		expect(tasks).toEqual([
+			SelfHealingReconciliationTask,
+			SubstrateActorCleanupTask,
+			InstanceAiCheckpointPruningTask,
+		]);
 	});
 
 	it.each([true, false])(
@@ -43,6 +48,6 @@ describe('InstanceAiModule', () => {
 
 		const tasks = await new InstanceAiModule().systemTasks();
 
-		expect(tasks).toEqual([SelfHealingReconciliationTask]);
+		expect(tasks).toEqual([SelfHealingReconciliationTask, SubstrateActorCleanupTask]);
 	});
 });
