@@ -21,6 +21,7 @@ import { v5 as uuidv5 } from 'uuid';
 import { assertKnowledgePathSegment } from '@/modules/knowledge/files/storage-naming';
 import { SandboxSettingsService } from '@/services/sandbox-settings.service';
 import { sanitizeSandboxErrorDetail } from '@/utils/sanitize-sandbox-error-detail';
+import { SubstrateActorLifecycleService } from '@/services/substrate-actor-lifecycle.service';
 
 import type { AgentSandboxPrincipalHash } from './agent-sandbox-principal';
 import { AgentRepository } from './repositories/agent.repository';
@@ -38,12 +39,8 @@ const LABEL_SANDBOX_KIND = 'n8n-agent-sandbox-kind';
 const LABEL_PRINCIPAL_HASH = 'n8n-agent-principal-hash';
 
 const DEFAULT_SANDBOX_IMAGE = 'daytonaio/sandbox:0.5.0';
-const WORKSPACE_AUTO_STOP_INTERVAL_MINUTES = 5;
 const WORKSPACE_AUTO_ARCHIVE_INTERVAL_MINUTES = 60;
-const WORKSPACE_AUTO_DELETE_INTERVAL_MINUTES = 24 * 60;
-const KNOWLEDGE_AUTO_STOP_INTERVAL_MINUTES = 15;
 const KNOWLEDGE_AUTO_ARCHIVE_INTERVAL_MINUTES = 60;
-const KNOWLEDGE_AUTO_DELETE_INTERVAL_MINUTES = 7 * 24 * 60;
 
 /** `ephemeral` applies to every provider; the intervals are Daytona-only. */
 type SandboxLifecycle = Pick<
@@ -120,6 +117,7 @@ export class AgentSandboxRuntimeService {
 		private readonly instanceSettings: InstanceSettings,
 		private readonly agentRepository: AgentRepository,
 		private readonly sandboxSettingsService: SandboxSettingsService,
+		private readonly substrateActorLifecycle: SubstrateActorLifecycleService,
 	) {}
 
 	async warmKnowledgeSandbox(projectId: string, agentId: string): Promise<void> {
@@ -184,11 +182,11 @@ export class AgentSandboxRuntimeService {
 			buildWorkspaceLabels(projectId, agentId, principalHash),
 			`${provider}:workspace:${sandboxId}`,
 			{
-				// Persistent scratch space: archived after 1h idle, deleted after 24h.
+				// Persistent scratch space: stop after 5m idle, then delete after 24h.
 				ephemeral: false,
-				autoStopInterval: WORKSPACE_AUTO_STOP_INTERVAL_MINUTES,
+				autoStopInterval: this.agentsConfig.sandboxWorkspaceAutoStopMinutes,
 				autoArchiveInterval: WORKSPACE_AUTO_ARCHIVE_INTERVAL_MINUTES,
-				autoDeleteInterval: WORKSPACE_AUTO_DELETE_INTERVAL_MINUTES,
+				autoDeleteInterval: this.agentsConfig.sandboxWorkspaceAutoDeleteMinutes,
 			},
 			// Workspace sandboxes boot lazily on first filesystem/command use.
 			{
@@ -215,11 +213,11 @@ export class AgentSandboxRuntimeService {
 			`${provider}:knowledge:${sandboxId}`,
 			{
 				ephemeral: this.agentsConfig.sandboxEphemeral,
-				autoStopInterval: KNOWLEDGE_AUTO_STOP_INTERVAL_MINUTES,
+				autoStopInterval: this.agentsConfig.sandboxKnowledgeAutoStopMinutes,
 				autoArchiveInterval: KNOWLEDGE_AUTO_ARCHIVE_INTERVAL_MINUTES,
 				...(this.agentsConfig.sandboxEphemeral
 					? {}
-					: { autoDeleteInterval: KNOWLEDGE_AUTO_DELETE_INTERVAL_MINUTES }),
+					: { autoDeleteInterval: this.agentsConfig.sandboxKnowledgeAutoDeleteMinutes }),
 			},
 			// Knowledge sandboxes keep booting eagerly: warmup and mirror sync need a live sandbox.
 			{ eagerStart: true },
@@ -237,11 +235,6 @@ export class AgentSandboxRuntimeService {
 		lifecycle: SandboxLifecycle,
 		startOptions: SandboxStartOptions,
 	): Promise<AgentSandboxRuntime> {
-		if (provider === 'substrate' && lifecycle.ephemeral) {
-			throw new OperationalError(
-				'Agent Substrate sandboxes do not support N8N_AGENTS_AI_SANDBOX_EPHEMERAL. Configure an external Actor cleanup controller before enabling ephemeral Agent sandboxes.',
-			);
-		}
 		let pending = this.pendingSandboxAcquisitions.get(cacheKey);
 
 		if (!pending) {
@@ -314,7 +307,12 @@ export class AgentSandboxRuntimeService {
 		try {
 			const config =
 				provider === 'substrate'
-					? { ...(await this.sandboxSettingsService.getSubstrateConfig()), id: sandboxId }
+					? {
+							...(await this.sandboxSettingsService.getSubstrateConfig()),
+							id: sandboxId,
+							onDestroyed: async (actorId: string) =>
+								await this.substrateActorLifecycle.forgetActor(actorId),
+						}
 					: provider === 'daytona'
 						? await this.resolveDaytonaSandboxConfig(projectId, sandboxId, labels)
 						: await this.resolveN8nSandboxConfig(sandboxId);
@@ -351,15 +349,29 @@ export class AgentSandboxRuntimeService {
 
 		const config =
 			provider === 'substrate'
-				? {
-						...(await this.sandboxSettingsService.getSubstrateConfig()),
-						id: n8nSandboxId,
-						ephemeral: false,
-					}
+				? await this.resolveSubstrateSandboxConfig(n8nSandboxId, lifecycle)
 				: provider === 'daytona'
 					? await this.resolveDaytonaSandboxConfig(projectId, daytonaName, labels, lifecycle)
 					: await this.resolveN8nSandboxConfig(n8nSandboxId, lifecycle);
 		return await this.startSandbox(config, projectId, agentId, cacheKey, startOptions);
+	}
+
+	private async resolveSubstrateSandboxConfig(
+		sandboxId: string,
+		lifecycle: SandboxLifecycle,
+	): Promise<SubstrateSandboxConfig> {
+		const config = await this.sandboxSettingsService.getSubstrateConfig();
+		return {
+			...config,
+			id: sandboxId,
+			ephemeral: lifecycle.ephemeral ?? false,
+			onActivity: this.substrateActorLifecycle.createActivityRecorder(config.connection, {
+				autoStopMinutes: lifecycle.autoStopInterval ?? 0,
+				autoDeleteMinutes: lifecycle.autoDeleteInterval ?? -1,
+				ephemeral: lifecycle.ephemeral ?? false,
+			}),
+			onDestroyed: async (actorId) => await this.substrateActorLifecycle.forgetActor(actorId),
+		};
 	}
 
 	private async startSandbox(

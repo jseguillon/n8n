@@ -157,7 +157,7 @@ export class InstanceAiConfig {
 	@Env('N8N_INSTANCE_AI_SANDBOX_ENABLED')
 	sandboxEnabled: boolean = false;
 
-	/** Sandbox provider: 'n8n-sandbox' for n8n sandbox service, 'daytona' for Daytona-backed containers. */
+	/** Sandbox provider: 'n8n-sandbox', 'daytona', or 'substrate' for Agent Substrate Actors. */
 	@Env('N8N_INSTANCE_AI_SANDBOX_PROVIDER')
 	sandboxProvider: string = 'n8n-sandbox';
 
@@ -232,7 +232,8 @@ export class InstanceAiConfig {
 
 	/**
 	 * When true, sandboxes are created ephemeral: the provider deletes them once idle instead
-	 * of leaving them stopped. Intended for throwaway eval instances so sandboxes don't accumulate.
+	 * of leaving them stopped. Substrate deletes the Actor when the in-process thread cache expires.
+	 * Intended for throwaway eval instances so sandboxes don't accumulate.
 	 */
 	@Env('N8N_INSTANCE_AI_SANDBOX_EPHEMERAL')
 	sandboxEphemeral: boolean = false;
@@ -246,8 +247,8 @@ export class InstanceAiConfig {
 	evalInstance: boolean = false;
 
 	/**
-	 * Minutes an idle Daytona sandbox waits before it is stopped. Default 15 minutes.
-	 * `0` disables auto-stop (the sandbox stays running).
+	 * Minutes an idle Daytona sandbox waits before it is stopped, or a persistent Substrate Actor
+	 * waits before it is suspended. Default 15 minutes. `0` disables auto-stop.
 	 */
 	@Env('N8N_INSTANCE_AI_SANDBOX_AUTO_STOP_MINUTES')
 	sandboxAutoStopMinutes: number = 15;
@@ -260,8 +261,9 @@ export class InstanceAiConfig {
 	sandboxAutoArchiveMinutes: number = 60;
 
 	/**
-	 * Minutes a stopped Daytona sandbox waits before it is deleted. Default 7 days. A negative
-	 * value disables auto-delete; `0` deletes on stop. Ignored when {@link sandboxEphemeral} is true.
+	 * Minutes a stopped Daytona sandbox or suspended Substrate Actor waits before it is deleted.
+	 * Default 7 days. A negative value disables auto-delete; `0` deletes on stop. Ignored when
+	 * {@link sandboxEphemeral} is true.
 	 */
 	@Env('N8N_INSTANCE_AI_SANDBOX_AUTO_DELETE_MINUTES')
 	sandboxAutoDeleteMinutes: number = 7 * 24 * 60;

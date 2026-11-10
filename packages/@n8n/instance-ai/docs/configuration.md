@@ -84,7 +84,7 @@ without search results. `research(action="fetch-url")` still works.
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `N8N_INSTANCE_AI_SANDBOX_ENABLED` | boolean | `false` | Enable sandbox-backed workflow building. When false, workflow builder capability is unavailable. |
-| `N8N_INSTANCE_AI_SANDBOX_PROVIDER` | string | `n8n-sandbox` | Sandbox provider: `n8n-sandbox` for the n8n sandbox service, or `daytona` for the Daytona provider. On self-hosted, a provider selected in Instance AI settings takes precedence. |
+| `N8N_INSTANCE_AI_SANDBOX_PROVIDER` | string | `n8n-sandbox` | Sandbox provider: `n8n-sandbox`, `daytona`, or `substrate`. On self-hosted, a provider selected in Instance AI settings takes precedence. |
 | `DAYTONA_API_URL` | string | `''` | Daytona API URL (e.g. `https://app.daytona.io/api`). Required when provider is `daytona`. |
 | `DAYTONA_API_KEY` | string | `''` | Daytona API key for authentication. Required when provider is `daytona`. |
 | `N8N_SANDBOX_SERVICE_URL` | string | `''` | n8n sandbox service URL. Required when provider is `n8n-sandbox`. |
@@ -94,10 +94,10 @@ without search results. `research(action="fetch-url")` still works.
 | `N8N_INSTANCE_AI_SANDBOX_TIMEOUT` | number | `300000` | Default command timeout in the sandbox (milliseconds). |
 | `N8N_INSTANCE_AI_SANDBOX_CREATE_TIMEOUT_SECONDS` | number | `900` | Eval-harness-only Daytona cold-provisioning timeout in seconds. It must be a positive integer. |
 | `N8N_INSTANCE_AI_SANDBOX_NAME_PREFIX` | string | `''` | Prefix prepended to every Daytona sandbox name (e.g. `eval-baseline-daily`). Also surfaced as a `name_prefix` label. Empty in production. |
-| `N8N_INSTANCE_AI_SANDBOX_EPHEMERAL` | boolean | `false` | When true, sandboxes are created ephemeral: the provider deletes them once idle instead of leaving them stopped. Applies to both `n8n-sandbox` and `daytona`. Intended for throwaway eval instances so sandboxes don't accumulate. |
-| `N8N_INSTANCE_AI_SANDBOX_AUTO_STOP_MINUTES` | number | `15` | Minutes an idle Daytona sandbox waits before being stopped. `0` disables auto-stop. |
+| `N8N_INSTANCE_AI_SANDBOX_EPHEMERAL` | boolean | `false` | When true, sandboxes are created ephemeral: the provider deletes them once idle instead of leaving them stopped. Applies to `n8n-sandbox`, `daytona`, and Substrate. Intended for throwaway eval instances so sandboxes don't accumulate. |
+| `N8N_INSTANCE_AI_SANDBOX_AUTO_STOP_MINUTES` | number | `15` | Minutes an idle Daytona sandbox waits before being stopped, or a persistent Substrate Actor waits before it is suspended. `0` disables auto-stop. |
 | `N8N_INSTANCE_AI_SANDBOX_AUTO_ARCHIVE_MINUTES` | number | `60` (1 hour) | Minutes a stopped Daytona sandbox waits before being archived to cold storage. `0` uses Daytona's maximum interval. |
-| `N8N_INSTANCE_AI_SANDBOX_AUTO_DELETE_MINUTES` | number | `10080` (7 days) | Minutes a stopped Daytona sandbox waits before being deleted. Negative disables auto-delete; `0` deletes on stop. Ignored when `N8N_INSTANCE_AI_SANDBOX_EPHEMERAL` is true. |
+| `N8N_INSTANCE_AI_SANDBOX_AUTO_DELETE_MINUTES` | number | `10080` (7 days) | Minutes a stopped Daytona sandbox or suspended Substrate Actor waits before it is deleted. Negative disables auto-delete; `0` deletes on stop or suspend. Ignored when `N8N_INSTANCE_AI_SANDBOX_EPHEMERAL` is true. |
 | `N8N_INSTANCE_AI_BUILDER_SANDBOX_TTL_MS` | number | `900000` | Idle TTL for the in-process thread-workspace cache. Expiry removes the cache entry but does not delete the remote sandbox. `0` disables cache eviction. |
 | `N8N_INSTANCE_AI_DAYTONA_TOKEN_REFRESH_SKEW_MS` | number | `300000` | How early a Daytona token is refreshed before expiry (5 minutes). |
 | `N8N_INSTANCE_AI_SANDBOX_LINK_SDK` | boolean | `false` | Local-dev only. When `1` or `true`, pack `@n8n/utils`, `@n8n/errors`, `n8n-workflow`, and `@n8n/workflow-sdk` from the host monorepo into each sandbox after `npm install`. Build all four packages first. Start a new AI thread after changing this because existing sandboxes keep their initialized `node_modules`. |

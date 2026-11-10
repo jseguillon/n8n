@@ -74,7 +74,14 @@ creation.
 
 Daytona lifecycle values control auto-stop, auto-archive, and auto-delete.
 `N8N_INSTANCE_AI_SANDBOX_EPHEMERAL=true` asks Daytona to delete a sandbox when
-it stops, which supersedes the auto-delete interval.
+it stops, which supersedes the auto-delete interval. For Substrate, it deletes
+the Actor when the in-process thread cache expires.
+
+Substrate uses the same auto-stop and auto-delete values for persistent Actors.
+The cleanup task suspends an Actor after the idle interval and deletes it after
+the stopped interval. A cluster leader runs the task once per minute. The task
+stores Actor activity in the n8n database so it survives restarts and works
+across main processes. Auto-archive applies only to Daytona.
 
 ## Thread-Scoped Lifecycle
 
@@ -298,7 +305,7 @@ roots. If n8n cannot create the link, the tools use `/home/daytona/workspace`.
 | Variable                                        | Default                   | Purpose                                                                       |
 | ----------------------------------------------- | ------------------------- | ----------------------------------------------------------------------------- |
 | `N8N_INSTANCE_AI_SANDBOX_ENABLED`               | `false`                   | Enable the sandbox-backed workspace                                           |
-| `N8N_INSTANCE_AI_SANDBOX_PROVIDER`              | `n8n-sandbox`             | Select `n8n-sandbox` or `daytona`                                             |
+| `N8N_INSTANCE_AI_SANDBOX_PROVIDER`              | `n8n-sandbox`             | Select `n8n-sandbox`, `daytona`, or `substrate`                               |
 | `N8N_SANDBOX_SERVICE_URL`                       | empty                     | n8n sandbox service URL                                                       |
 | `N8N_SANDBOX_SERVICE_API_KEY`                   | empty                     | n8n sandbox service API key                                                   |
 | `DAYTONA_API_URL`                               | empty                     | Daytona API URL                                                               |
@@ -309,9 +316,9 @@ roots. If n8n cannot create the link, the tools use `/home/daytona/workspace`.
 | `N8N_INSTANCE_AI_BUILDER_SANDBOX_TTL_MS`        | `900000`                  | In-process idle cache TTL; `0` disables eviction                              |
 | `N8N_INSTANCE_AI_SANDBOX_NAME_PREFIX`           | empty                     | Prefix and label for Daytona names                                            |
 | `N8N_INSTANCE_AI_SANDBOX_EPHEMERAL`             | `false`                   | Delete the sandbox once idle instead of stopping it                           |
-| `N8N_INSTANCE_AI_SANDBOX_AUTO_STOP_MINUTES`     | `15`                      | Daytona idle time before stop; `0` disables auto-stop                         |
+| `N8N_INSTANCE_AI_SANDBOX_AUTO_STOP_MINUTES`     | `15`                      | Daytona idle time before stop or Substrate idle time before suspend; `0` disables auto-stop |
 | `N8N_INSTANCE_AI_SANDBOX_AUTO_ARCHIVE_MINUTES`  | `60`                      | Daytona stopped time before archive; `0` uses its maximum                     |
-| `N8N_INSTANCE_AI_SANDBOX_AUTO_DELETE_MINUTES`   | `10080`                   | Daytona stopped time before delete; negative disables and `0` deletes on stop |
+| `N8N_INSTANCE_AI_SANDBOX_AUTO_DELETE_MINUTES`   | `10080`                   | Daytona stopped or Substrate suspended time before delete; negative disables and `0` deletes on stop |
 | `N8N_INSTANCE_AI_DAYTONA_TOKEN_REFRESH_SKEW_MS` | `300000`                  | Proxy-token refresh skew                                                      |
 | `N8N_INSTANCE_AI_SANDBOX_LINK_SDK`              | `false`                   | Install local workspace packages for development                              |
 

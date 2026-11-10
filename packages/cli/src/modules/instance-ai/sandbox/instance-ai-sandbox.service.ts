@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { SandboxAcquisitionError, SandboxNotReadyError } from '@n8n/agents/sandbox';
 import { getN8nVersion } from '@n8n/backend-common';
+import type { SubstrateSandboxConfig } from '@n8n/agents/sandbox';
 import type { InstanceAiConfig } from '@n8n/config';
 import type { User } from '@n8n/db';
 import {
@@ -25,6 +26,7 @@ import { OperationalError, UnexpectedError } from '@n8n/errors';
 import { nanoid } from 'nanoid';
 import { v5 as uuidv5 } from 'uuid';
 
+import type { SubstrateActorLifecyclePolicy } from '@/services/substrate-actor-lifecycle.service';
 import { callAiServiceWithRetry } from '@/utils/ai-service-retry';
 
 import {
@@ -209,6 +211,13 @@ export type InstanceAiSandboxSettings = {
 	resolveN8nSandboxConfig: () => Promise<{ serviceUrl?: string; apiKey?: string }>;
 };
 
+export type InstanceAiSubstrateActivityRecorder = (
+	actorId: string,
+	connection: SubstrateSandboxConfig['connection'],
+	policy: SubstrateActorLifecyclePolicy,
+) => Promise<void>;
+export type InstanceAiSubstrateDestroyRecorder = (actorId: string) => Promise<void>;
+
 /** Proxy collaborator that routes Daytona traffic through the AI assistant service. */
 export type InstanceAiSandboxProxy = {
 	isProxyEnabled: () => boolean;
@@ -237,6 +246,8 @@ export type InstanceAiSandboxServiceOptions = {
 		threadId: string,
 		userId?: string,
 	) => Promise<{ userId: string; proxyConfig?: ServiceProxyConfig }>;
+	onSubstrateActivity?: InstanceAiSubstrateActivityRecorder;
+	onSubstrateDestroyed?: InstanceAiSubstrateDestroyRecorder;
 };
 
 /**
@@ -312,7 +323,8 @@ export class InstanceAiSandboxService {
 			};
 		}
 
-		if (provider === 'substrate') return substrateSandboxConfig(this.instanceAiConfig);
+		if (provider === 'substrate')
+			return this.withSubstrateActivity(substrateSandboxConfig(this.instanceAiConfig));
 		if (provider === 'daytona') {
 			return {
 				enabled: true,
@@ -350,7 +362,9 @@ export class InstanceAiSandboxService {
 			normalizeSandboxProvider(this.instanceAiConfig.sandboxProvider) === 'substrate' &&
 			this.options.settingsService.resolveSubstrateConfig
 		) {
-			return await this.options.settingsService.resolveSubstrateConfig();
+			return this.withSubstrateActivity(
+				await this.options.settingsService.resolveSubstrateConfig(),
+			);
 		}
 		const base = this.getSandboxConfigFromEnv();
 		if (!base.enabled) return base;
@@ -406,6 +420,21 @@ export class InstanceAiSandboxService {
 			...base,
 			serviceUrl: sandbox.serviceUrl ?? base.serviceUrl,
 			apiKey: sandbox.apiKey ?? base.apiKey,
+		};
+	}
+
+	private withSubstrateActivity(config: SubstrateSandboxConfig): SubstrateSandboxConfig {
+		if (!this.options.onSubstrateActivity || config.ephemeral) return config;
+		const policy: SubstrateActorLifecyclePolicy = {
+			autoStopMinutes: this.instanceAiConfig.sandboxAutoStopMinutes,
+			autoDeleteMinutes: this.instanceAiConfig.sandboxAutoDeleteMinutes,
+			ephemeral: false,
+		};
+		return {
+			...config,
+			onActivity: async (actorId) =>
+				await this.options.onSubstrateActivity?.(actorId, config.connection, policy),
+			onDestroyed: this.options.onSubstrateDestroyed,
 		};
 	}
 
@@ -759,6 +788,9 @@ export class InstanceAiSandboxService {
 						},
 						async () => await sandbox?.destroy?.(),
 					);
+					if (sandbox?.provider === 'substrate') {
+						await this.options.onSubstrateDestroyed?.(sandbox.id);
+					}
 				},
 				{ resolveConfig: this.lifecycleTraceConfig(threadId, userId) },
 			);

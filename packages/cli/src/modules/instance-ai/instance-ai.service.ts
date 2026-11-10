@@ -106,6 +106,7 @@ import {
 	UnexpectedError,
 	UserError,
 } from '@n8n/errors';
+import { SubstrateActorLifecycleService } from '@/services/substrate-actor-lifecycle.service';
 import { InstanceAiBuilderDelegateAdapterService } from './instance-ai-builder-delegate.adapter';
 import { modelStreamStallOptions } from '@/utils/model-stream-stall-options';
 import { AiService } from '@/services/ai.service';
@@ -582,6 +583,13 @@ export class InstanceAiService {
 			settingsService: this.settingsService,
 			aiService: this.aiService,
 			getTemplatesService: () => this.adapterService.getTemplatesService(),
+			onSubstrateActivity: async (actorId, connection, policy) =>
+				await Container.get(SubstrateActorLifecycleService).createActivityRecorder(
+					connection,
+					policy,
+				)(actorId),
+			onSubstrateDestroyed: async (actorId) =>
+				await Container.get(SubstrateActorLifecycleService).forgetActor(actorId),
 			resolveTracingConfig: async (threadId, userId) => {
 				const ownerId = userId ?? (await this.memoryService.getThreadActorId(threadId));
 				if (!ownerId) return { userId: 'system' };

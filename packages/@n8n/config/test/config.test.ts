@@ -378,6 +378,14 @@ describe('GlobalConfig', () => {
 			midRunObservation: true,
 			sandboxEnabled: false,
 			sandboxProvider: 'n8n-sandbox',
+			substrateEndpoint: '',
+			substrateRouterUrl: '',
+			substrateAtespace: '',
+			substrateTemplate: '',
+			substrateTokenFile: '',
+			substrateCaFile: '',
+			substrateRouterCredentialFile: '',
+			substrateServerName: 'api.ate-system.svc',
 			sandboxImage: 'daytonaio/sandbox:0.5.0',
 			sandboxSnapshot: '',
 			daytonaApiUrl: '',
@@ -784,6 +792,10 @@ describe('GlobalConfig', () => {
 			maxGeneratedTotalMb: 500,
 			maxTotalMb: 1536,
 			maxImportMb: 200,
+			sandboxWorkspaceAutoStopMinutes: 5,
+			sandboxWorkspaceAutoDeleteMinutes: 1440,
+			sandboxKnowledgeAutoStopMinutes: 15,
+			sandboxKnowledgeAutoDeleteMinutes: 10080,
 			channelReconcileIntervalSeconds: 60,
 			webhookChannelRateLimit: 300,
 			whatsAppAllowTemporaryToken: false,
@@ -843,6 +855,23 @@ describe('GlobalConfig', () => {
 		const config = Container.get(GlobalConfig);
 
 		expect(config.agents.sandboxSnapshot).toBe('n8n/agent-knowledge:1.2.3');
+	});
+
+	it('should parse Agent sandbox lifecycle intervals from env variables', () => {
+		process.env = {
+			N8N_AGENTS_AI_SANDBOX_WORKSPACE_AUTO_STOP_MINUTES: '7',
+			N8N_AGENTS_AI_SANDBOX_WORKSPACE_AUTO_DELETE_MINUTES: '2000',
+			N8N_AGENTS_AI_SANDBOX_KNOWLEDGE_AUTO_STOP_MINUTES: '20',
+			N8N_AGENTS_AI_SANDBOX_KNOWLEDGE_AUTO_DELETE_MINUTES: '-1',
+		};
+		const config = Container.get(GlobalConfig);
+
+		expect(config.agents).toMatchObject({
+			sandboxWorkspaceAutoStopMinutes: 7,
+			sandboxWorkspaceAutoDeleteMinutes: 2_000,
+			sandboxKnowledgeAutoStopMinutes: 20,
+			sandboxKnowledgeAutoDeleteMinutes: -1,
+		});
 	});
 
 	it.each([

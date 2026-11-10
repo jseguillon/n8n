@@ -151,6 +151,7 @@ Auto-generated from the SQLite migrations in @n8n/db. Do not edit by hand.
 | [skill_source](skill_source.md) | 13 |  | table |
 | [skill_source_link](skill_source_link.md) | 14 |  | table |
 | [skill_version](skill_version.md) | 12 |  | table |
+| [substrate_actor_activity](substrate_actor_activity.md) | 9 |  | table |
 | [tag_entity](tag_entity.md) | 4 |  | table |
 | [test_case_execution](test_case_execution.md) | 16 |  | table |
 | [test_run](test_run.md) | 16 |  | table |
@@ -1939,6 +1940,17 @@ erDiagram
   varchar_255_ sourceRevision
   datetime_3_ updatedAt
   INTEGER version
+}
+"substrate_actor_activity" {
+  varchar_63_ actorId PK
+  REAL autoDeleteMinutes
+  REAL autoStopMinutes
+  varchar_64_ connectionFingerprint
+  datetime_3_ createdAt
+  boolean ephemeral
+  datetime_3_ lastActivityAt
+  datetime_3_ lastSuspendedAt
+  datetime_3_ updatedAt
 }
 "tag_entity" {
   datetime_3_ createdAt

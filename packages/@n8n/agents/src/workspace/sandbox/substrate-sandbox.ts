@@ -61,6 +61,8 @@ export interface SubstrateSandboxOptions extends SubstrateConnection {
 	id?: string;
 	timeout?: number;
 	ephemeral?: boolean;
+	onActivity?: (actorId: string) => Promise<void>;
+	onDestroyed?: (actorId: string) => Promise<void>;
 }
 
 /** Each n8n workspace has its own Actor. The router wakes suspended Actors. */
@@ -97,6 +99,7 @@ export class SubstrateSandbox extends BaseSandbox {
 		if (this.options.ephemeral) {
 			try {
 				await this.control.deleteActor(this.id);
+				await this.options.onDestroyed?.(this.id);
 			} finally {
 				await this.closeRouterAgent();
 			}
@@ -108,6 +111,7 @@ export class SubstrateSandbox extends BaseSandbox {
 	async destroy(): Promise<void> {
 		try {
 			await this.control.deleteActor(this.id);
+			await this.options.onDestroyed?.(this.id);
 		} finally {
 			await this.closeRouterAgent();
 		}
@@ -143,16 +147,22 @@ export class SubstrateSandbox extends BaseSandbox {
 		url.search = new URLSearchParams(query).toString();
 		const headers = new Headers(init.headers);
 		headers.set('ate-target-actor', `${this.options.atespace}/${this.id}`);
+		await this.options.onActivity?.(this.id);
 		const dispatcher = await this.getRouterAgent(url);
-		const response = await fetch(url, {
-			...init,
-			redirect: 'error',
-			headers,
-			signal: init.signal ?? AbortSignal.timeout(this.timeout),
-			// Node's fetch accepts the Undici dispatcher option for mTLS.
-			// @ts-expect-error dispatcher is a Node fetch extension
-			dispatcher,
-		});
+		let response: Response;
+		try {
+			response = await fetch(url, {
+				...init,
+				redirect: 'error',
+				headers,
+				signal: init.signal ?? AbortSignal.timeout(this.timeout),
+				// Node's fetch accepts the Undici dispatcher option for mTLS.
+				// @ts-expect-error dispatcher is a Node fetch extension
+				dispatcher,
+			});
+		} finally {
+			await this.options.onActivity?.(this.id);
+		}
 		if (!response.ok) {
 			await response.body?.cancel();
 			throw new SandboxServiceError(
@@ -212,6 +222,24 @@ export class SubstrateSandbox extends BaseSandbox {
 	override async executeCommand(
 		command: string,
 		args: string[] = [],
+		options?: ExecuteCommandOptions,
+	): Promise<CommandResult> {
+		const heartbeat = setInterval(() => {
+			if (this.options.onActivity) {
+				void this.options.onActivity(this.id).catch(() => undefined);
+			}
+		}, 30_000);
+		heartbeat.unref();
+		try {
+			return await this.executeCommandWithActivity(command, args, options);
+		} finally {
+			clearInterval(heartbeat);
+		}
+	}
+
+	private async executeCommandWithActivity(
+		command: string,
+		args: string[],
 		options?: ExecuteCommandOptions,
 	): Promise<CommandResult> {
 		await this.ensureRunning({ abortSignal: options?.abortSignal });

@@ -1,4 +1,4 @@
-import { Logger } from '@n8n/backend-common';
+import { Logger, ModuleRegistry } from '@n8n/backend-common';
 import { AgentsConfig, GlobalConfig } from '@n8n/config';
 import type { ModuleInterface, SystemTaskClass } from '@n8n/decorators';
 import { BackendModule } from '@n8n/decorators';
@@ -239,6 +239,13 @@ export class AgentsModule implements ModuleInterface {
 			AgentInterruptedExecutionSweepTask,
 			AgentChannelMediaRetentionTask,
 		];
+
+		if (!Container.get(ModuleRegistry).isActive('instance-ai')) {
+			const { SubstrateActorCleanupTask } = await import(
+				'@/services/substrate-actor-cleanup.task.js'
+			);
+			tasks.push(SubstrateActorCleanupTask);
+		}
 
 		// Like `telemetry-pulse`: make sure no job is scheduled when telemetry is off.
 		if (Container.get(GlobalConfig).diagnostics.enabled) {

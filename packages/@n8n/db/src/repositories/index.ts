@@ -97,6 +97,7 @@ export {
 } from './poller-state.repository';
 export { ProcessedDataRepository } from './processed-data.repository';
 export { SettingsRepository } from './settings.repository';
+export { SubstrateActorActivityRepository } from './substrate-actor-activity.repository';
 export { TagRepository } from './tag.repository';
 export { TestCaseExecutionRepository } from './test-case-execution.repository.ee';
 export { TestRunRepository, type TestRunSummary } from './test-run.repository.ee';
