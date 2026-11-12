@@ -157,7 +157,7 @@ export class InstanceAiVerificationService {
 	}
 
 	async verifySandbox(
-		user: User,
+		_user: User,
 		request: InstanceAiVerifySandboxRequest,
 	): Promise<InstanceAiVerificationResponse> {
 		const provider = request.provider ?? this.globalConfig.instanceAi.sandboxProvider;
@@ -167,7 +167,7 @@ export class InstanceAiVerificationService {
 			| Awaited<ReturnType<typeof import('@n8n/instance-ai')['createWorkspace']>>
 			| undefined;
 		try {
-			const config = await this.resolveSandboxConfig(user, request);
+			const config = await this.resolveSandboxConfig(request);
 			abortSignal = AbortSignal.timeout(config.timeout ?? VERIFICATION_TIMEOUT_MS);
 			const [instanceAi, agents] = await Promise.all([
 				import('@n8n/instance-ai'),
@@ -294,7 +294,6 @@ export class InstanceAiVerificationService {
 	}
 
 	private async resolveSandboxConfig(
-		user: User,
 		request: InstanceAiVerifySandboxRequest,
 	): Promise<SandboxConfig> {
 		const instanceAi = this.globalConfig.instanceAi;
@@ -319,11 +318,7 @@ export class InstanceAiVerificationService {
 
 		if (provider === 'substrate') {
 			return {
-				...(await this.settingsService.resolveSubstrateConfig(
-					connection,
-					request.credentialId,
-					user,
-				)),
+				...(await this.settingsService.resolveSubstrateConfig(connection)),
 				ephemeral: true,
 			};
 		}

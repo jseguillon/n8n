@@ -162,6 +162,11 @@ const modelOptions = computed(() =>
 const sandboxEnvManaged = computed(() => store.settings?.sandboxEnvConfigured === true);
 const searchEnvManaged = computed(() => store.settings?.searchEnvConfigured === true);
 const readOnly = computed(() => !store.canManageInstanceCredentials);
+const sandboxProviders = computed(() =>
+	INSTANCE_AI_SANDBOX_PROVIDERS.filter(
+		(provider) => !store.isProxyEnabled || provider.id !== 'substrate',
+	),
+);
 const isProxyDaytonaSelection = computed(
 	() =>
 		props.step === 'sandbox' &&
@@ -201,7 +206,11 @@ const allCompatibleCredentials = computed(() => {
 				? ['daytonaApi', 'httpHeaderAuth', 'substrateApi']
 				: INSTANCE_AI_SEARCH_PROVIDERS.map(({ credentialType }) => credentialType),
 	);
-	return credentials.filter((credential) => allowedTypes.has(credential.type));
+	return credentials.filter(
+		(credential) =>
+			allowedTypes.has(credential.type) &&
+			!(props.step === 'sandbox' && store.isProxyEnabled && credential.type === 'substrateApi'),
+	);
 });
 
 const compatibleCredentials = computed(() => {
@@ -431,23 +440,10 @@ async function hydrateSandbox(generation: number): Promise<void> {
 		apiToken: '',
 	});
 	if (sandboxEnvManaged.value) return;
-	if (store.settings?.sandboxProvider === 'substrate') {
-		sandboxProvider.value = 'substrate';
-		const id = store.settings.substrateCredentialId;
-		if (id) {
-			const data = await credentialData(id);
-			if (generation !== hydrationGeneration) return;
-			for (const field of [...substrateFields.map(({ key }) => key), 'apiToken'] as const)
-				substrate[field] = readString(data, field);
-		}
-		return;
-	}
-	const isDaytona = store.settings?.sandboxProvider === 'daytona';
-	const credentialId = isDaytona
-		? store.settings?.daytonaCredentialId
-		: store.settings?.n8nSandboxCredentialId;
+	if (store.isProxyEnabled && store.settings?.sandboxProvider === 'substrate') return;
+	const credentialId = assignedCredentialId();
 	if (!credentialId) return;
-	sandboxProvider.value = isDaytona ? 'daytona' : 'n8n-sandbox';
+	sandboxProvider.value = store.settings?.sandboxProvider ?? 'n8n-sandbox';
 	const assigned = store.serviceCredentials.find(({ id }) => id === credentialId);
 	if (readOnly.value && assigned) {
 		applyExistingCredential(assigned);
@@ -455,7 +451,10 @@ async function hydrateSandbox(generation: number): Promise<void> {
 	}
 	const data = await credentialData(credentialId);
 	if (generation !== hydrationGeneration) return;
-	if (isDaytona) daytonaApiKey.value = readString(data, 'apiKey');
+	if (sandboxProvider.value === 'substrate') {
+		for (const field of [...substrateFields.map(({ key }) => key), 'apiToken'] as const)
+			substrate[field] = readString(data, field);
+	} else if (sandboxProvider.value === 'daytona') daytonaApiKey.value = readString(data, 'apiKey');
 	else sandboxApiKey.value = readString(data, 'value');
 }
 
@@ -545,7 +544,7 @@ async function selectModelProvider(provider: unknown): Promise<void> {
 }
 
 function selectSandboxProvider(provider: unknown): void {
-	const next = INSTANCE_AI_SANDBOX_PROVIDERS.find(({ id }) => id === provider);
+	const next = sandboxProviders.value.find(({ id }) => id === provider);
 	if (next) {
 		selectedExistingCredentialId.value = '';
 		sandboxProvider.value = next.id;
@@ -679,8 +678,6 @@ async function saveExistingCredential(): Promise<boolean> {
 async function verifyExistingCredential(): Promise<InstanceAiVerificationResponse> {
 	const credential = selectedExistingCredential.value;
 	if (!credential) return { ok: false, failure: 'provider_error' };
-	if (credential.type === 'substrateApi')
-		return await store.verifySandbox({ provider: 'substrate', credentialId: credential.id });
 	return (await testSavedCredential(credential.id, credential.name, credential.type))
 		? { ok: true }
 		: {
@@ -1083,7 +1080,7 @@ const stepLede = computed(() => {
 						@update:model-value="selectSandboxProvider"
 					>
 						<div
-							v-for="provider in INSTANCE_AI_SANDBOX_PROVIDERS"
+							v-for="provider in sandboxProviders"
 							:key="provider.id"
 							:class="$style.optionCard"
 							:data-test-id="`assistant-sandbox-${provider.id}`"

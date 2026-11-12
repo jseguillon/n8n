@@ -2809,7 +2809,6 @@ export class InstanceAiVerifyModelRequest extends Z.class({
 export class InstanceAiVerifySandboxRequest extends Z.class({
 	provider: instanceAiSandboxProviderSchema.optional(),
 	connection: instanceAiConnectionSchema.optional(),
-	credentialId: z.string().min(1).optional(),
 	serviceUrl: z.string().url().optional(),
 }) {}
 
