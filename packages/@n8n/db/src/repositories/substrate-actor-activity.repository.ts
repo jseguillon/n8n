@@ -1,5 +1,5 @@
 import { Service } from '@n8n/di';
-import { DataSource, IsNull, LessThanOrEqual, type UpdateResult } from '@n8n/typeorm';
+import { DataSource } from '@n8n/typeorm';
 
 import { SubstrateActorActivity } from '../entities/substrate-actor-activity';
 import { TransactionRunner } from '../services/transaction';
@@ -16,15 +16,27 @@ export type SubstrateActorActivityInput = Pick<
 	'actorId' | 'connectionFingerprint' | 'autoStopMinutes' | 'autoDeleteMinutes' | 'ephemeral'
 >;
 
-export type SubstrateActorCommandCompletion = {
+export type SubstrateActorSuspensionClaim = {
 	actorId: string;
-	activityAt: Date;
+	claimToken: string;
 	action: 'suspend' | 'delete';
 };
 
-export type SubstrateActorSuspensionClaim = SubstrateActorCommandCompletion & {
-	claimedAt: Date;
-};
+const CLAIM_LEASE_MS = 10 * 60_000;
+
+function liveOperations(activity: SubstrateActorActivity, now: number) {
+	return Object.fromEntries(
+		Object.entries(activity.operationLeases).filter(([, until]) => until > now),
+	);
+}
+
+function claimIsLive(activity: SubstrateActorActivity, now: number) {
+	return (
+		activity.suspensionClaimedAt !== null &&
+		(activity.claimUntil?.getTime() ?? activity.suspensionClaimedAt.getTime() + CLAIM_LEASE_MS) >
+			now
+	);
+}
 
 @Service()
 export class SubstrateActorActivityRepository {
@@ -34,255 +46,214 @@ export class SubstrateActorActivityRepository {
 		this.table = new SubstrateActorActivityTable(dataSource, transactionRunner);
 	}
 
-	async recordActivity(
+	private get rows() {
+		return this.table.managerFor({}).getRepository(SubstrateActorActivity);
+	}
+
+	private async update(activity: SubstrateActorActivity, changes: Partial<SubstrateActorActivity>) {
+		const result = await this.rows.update(
+			{ actorId: activity.actorId, revision: activity.revision },
+			{ ...changes, revision: activity.revision + 1 },
+		);
+		return (result.affected ?? 0) > 0;
+	}
+
+	async startOperation(
 		input: SubstrateActorActivityInput,
-		activityAt = new Date(),
+		operationId: string,
+		leaseMs: number,
+		now = new Date(),
 	): Promise<boolean> {
 		for (;;) {
-			const activity = await this.table.findOneBy({ actorId: input.actorId });
+			const activity = await this.rows.findOneBy({ actorId: input.actorId });
 			if (!activity) {
-				await this.table.upsert({ ...input, lastActivityAt: activityAt, lastSuspendedAt: null }, [
-					'actorId',
-				]);
+				// Ignore concurrent creation instead of overwriting another operation's lease.
+				await this.rows
+					.createQueryBuilder()
+					.insert()
+					.values({
+						...input,
+						lastActivityAt: now,
+						lastSuspendedAt: null,
+						suspensionClaimedAt: null,
+						operationLeases: {},
+					})
+					.orIgnore()
+					.execute();
 				continue;
 			}
-			if (activity.suspensionClaimedAt) return false;
+			if (
+				activity.connectionFingerprint !== input.connectionFingerprint ||
+				claimIsLive(activity, now.getTime())
+			)
+				return false;
+			const leases = liveOperations(activity, now.getTime());
+			leases[operationId] = Math.max(leases[operationId] ?? 0, now.getTime() + leaseMs);
+			if (
+				await this.update(activity, {
+					...input,
+					operationLeases: leases,
+					lastActivityAt: now,
+					lastSuspendedAt: null,
+					suspendAfter: null,
+					suspensionClaimedAt: null,
+					claimToken: null,
+					claimUntil: null,
+				})
+			)
+				return true;
+		}
+	}
 
-			const recordedAt = new Date(
-				Math.max(activityAt.getTime(), activity.lastActivityAt.getTime()),
+	async heartbeatOperation(
+		actorId: string,
+		operationId: string,
+		leaseMs: number,
+		now = new Date(),
+	): Promise<boolean> {
+		for (;;) {
+			const activity = await this.rows.findOneBy({ actorId });
+			if (
+				!activity ||
+				claimIsLive(activity, now.getTime()) ||
+				!Object.hasOwn(activity.operationLeases, operationId)
+			)
+				return false;
+			const leases = liveOperations(activity, now.getTime());
+			leases[operationId] = Math.max(
+				activity.operationLeases[operationId],
+				now.getTime() + leaseMs,
 			);
-			const result = await this.table.update(
-				{
-					actorId: input.actorId,
-					lastActivityAt: activity.lastActivityAt,
-					suspensionClaimedAt: IsNull(),
-				},
-				{ ...input, lastActivityAt: recordedAt, lastSuspendedAt: null },
-			);
-			if ((result.affected ?? 0) > 0) return true;
+			if (await this.update(activity, { operationLeases: leases, lastActivityAt: now }))
+				return true;
+		}
+	}
+
+	async finishOperation(
+		actorId: string,
+		operationId: string,
+		delayMs: number,
+		now = new Date(),
+	): Promise<Date | null> {
+		for (;;) {
+			const activity = await this.rows.findOneBy({ actorId });
+			// Duplicate and late completions cannot release another operation's lease.
+			if (
+				!activity ||
+				!Object.hasOwn(activity.operationLeases, operationId) ||
+				claimIsLive(activity, now.getTime())
+			)
+				return null;
+			const leases = liveOperations(activity, now.getTime());
+			delete leases[operationId];
+			const suspendAfter =
+				activity.autoStopMinutes > 0 && Object.keys(leases).length === 0
+					? new Date(now.getTime() + delayMs)
+					: null;
+			if (
+				await this.update(activity, { operationLeases: leases, lastActivityAt: now, suspendAfter })
+			)
+				return suspendAfter;
+		}
+	}
+
+	async claimDueActor(
+		actorId: string,
+		fingerprint: string,
+		claimToken: string,
+		now = new Date(),
+		recovery = false,
+	): Promise<SubstrateActorSuspensionClaim | undefined> {
+		for (;;) {
+			const activity = await this.rows.findOneBy({ actorId });
+			if (
+				!activity ||
+				activity.connectionFingerprint !== fingerprint ||
+				claimIsLive(activity, now.getTime())
+			)
+				return;
+			if (Object.keys(liveOperations(activity, now.getTime())).length > 0) return;
+			// Keep legacy command leases until they expire during an upgrade.
+			if (
+				activity.activeCommandCount > 0 &&
+				(activity.activeCommandLeaseUntil?.getTime() ?? 0) > now.getTime()
+			)
+				return;
+			const shouldDelete =
+				activity.lastSuspendedAt !== null &&
+				activity.autoDeleteMinutes >= 0 &&
+				now.getTime() - activity.lastSuspendedAt.getTime() >= activity.autoDeleteMinutes * 60_000;
+			const shouldSuspend =
+				activity.lastSuspendedAt === null &&
+				activity.autoStopMinutes > 0 &&
+				(activity.suspendAfter !== null
+					? activity.suspendAfter.getTime() <= now.getTime()
+					: recovery &&
+						now.getTime() - activity.lastActivityAt.getTime() >= activity.autoStopMinutes * 60_000);
+			if (!shouldDelete && !shouldSuspend) return;
+			const action =
+				shouldDelete || activity.ephemeral || activity.autoDeleteMinutes === 0
+					? 'delete'
+					: 'suspend';
+			if (
+				await this.update(activity, {
+					claimToken,
+					claimUntil: new Date(now.getTime() + CLAIM_LEASE_MS),
+					suspensionClaimedAt: now,
+					operationLeases: {},
+					activeCommandCount: 0,
+					activeCommandLeaseUntil: null,
+				})
+			) {
+				return { actorId, claimToken, action };
+			}
+		}
+	}
+
+	async completeClaim(claim: SubstrateActorSuspensionClaim, now = new Date()): Promise<boolean> {
+		for (;;) {
+			const activity = await this.rows.findOneBy({ actorId: claim.actorId });
+			if (!activity || activity.claimToken !== claim.claimToken) return false;
+			if (claim.action === 'delete') {
+				const result = await this.rows.delete({
+					actorId: claim.actorId,
+					revision: activity.revision,
+					claimToken: claim.claimToken,
+				});
+				if ((result.affected ?? 0) > 0) return true;
+			} else if (
+				await this.update(activity, {
+					lastSuspendedAt: now,
+					suspendAfter: null,
+					suspensionClaimedAt: null,
+					claimUntil: null,
+					claimToken: null,
+				})
+			)
+				return true;
+		}
+	}
+
+	async releaseClaim(claim: SubstrateActorSuspensionClaim): Promise<void> {
+		for (;;) {
+			const activity = await this.rows.findOneBy({ actorId: claim.actorId });
+			if (!activity || activity.claimToken !== claim.claimToken) return;
+			if (
+				await this.update(activity, {
+					suspensionClaimedAt: null,
+					claimUntil: null,
+					claimToken: null,
+				})
+			)
+				return;
 		}
 	}
 
 	async findAll(): Promise<SubstrateActorActivity[]> {
-		return await this.table.find();
-	}
-
-	async markSuspended(
-		actorId: string,
-		expectedActivityAt: Date,
-		claimedAt: Date,
-		suspendedAt = new Date(),
-		releaseClaim = true,
-	): Promise<boolean> {
-		const result: UpdateResult = await this.table.update(
-			{ actorId, lastActivityAt: expectedActivityAt, suspensionClaimedAt: claimedAt },
-			{
-				lastSuspendedAt: suspendedAt,
-				suspensionClaimedAt: releaseClaim ? null : claimedAt,
-				activeCommandCount: 0,
-				activeCommandLeaseUntil: null,
-			},
-		);
-		return (result.affected ?? 0) > 0;
-	}
-
-	async claimIdleActor(
-		actorId: string,
-		expectedActivityAt: Date,
-		expectedSuspendedAt: Date | null,
-		claimedAt: Date,
-		now = new Date(),
-	): Promise<boolean> {
-		const common = {
-			actorId,
-			lastActivityAt: expectedActivityAt,
-			lastSuspendedAt: expectedSuspendedAt ?? IsNull(),
-			suspensionClaimedAt: IsNull(),
-		};
-		const eligibleConditions = [
-			{ ...common, activeCommandCount: 0 },
-			{ ...common, activeCommandLeaseUntil: IsNull() },
-			{ ...common, activeCommandLeaseUntil: LessThanOrEqual(now) },
-		];
-		for (const where of eligibleConditions) {
-			const result = await this.table.update(where, {
-				suspensionClaimedAt: claimedAt,
-				activeCommandCount: 0,
-				activeCommandLeaseUntil: null,
-			});
-			if ((result.affected ?? 0) > 0) return true;
-		}
-		return false;
-	}
-
-	async releaseExpiredSuspensionClaims(expiredBefore: Date): Promise<void> {
-		await this.table.update(
-			{ suspensionClaimedAt: LessThanOrEqual(expiredBefore) },
-			{ suspensionClaimedAt: null },
-		);
-	}
-
-	async releaseSuspensionClaim(actorId: string, claimedAt: Date): Promise<void> {
-		await this.table.update(
-			{ actorId, suspensionClaimedAt: claimedAt },
-			{ suspensionClaimedAt: null },
-		);
-	}
-
-	async recordCommandStarted(
-		actorId: string,
-		commandTimeoutMs: number,
-		activityAt = new Date(),
-	): Promise<boolean> {
-		const activity = await this.table.findOneBy({ actorId });
-		if (!activity || activity.suspensionClaimedAt) return false;
-
-		const hasActiveCommands =
-			activity.activeCommandCount > 0 &&
-			activity.activeCommandLeaseUntil !== null &&
-			activity.activeCommandLeaseUntil.getTime() > activityAt.getTime();
-		const recordedAt = new Date(Math.max(activityAt.getTime(), activity.lastActivityAt.getTime()));
-		const newLeaseUntil = new Date(recordedAt.getTime() + commandTimeoutMs + 60_000);
-		const activeCommandLeaseUntil = hasActiveCommands
-			? new Date(Math.max(activity.activeCommandLeaseUntil!.getTime(), newLeaseUntil.getTime()))
-			: newLeaseUntil;
-		const result = await this.table.update(
-			{ actorId, lastActivityAt: activity.lastActivityAt, suspensionClaimedAt: IsNull() },
-			{
-				lastActivityAt: recordedAt,
-				lastSuspendedAt: null,
-				activeCommandCount: hasActiveCommands ? activity.activeCommandCount + 1 : 1,
-				activeCommandLeaseUntil,
-			},
-		);
-		return (result.affected ?? 0) > 0;
-	}
-
-	async recordCommandHeartbeat(
-		actorId: string,
-		commandTimeoutMs: number,
-		activityAt = new Date(),
-	): Promise<boolean> {
-		const activity = await this.table.findOneBy({ actorId });
-		if (
-			!activity ||
-			activity.suspensionClaimedAt ||
-			activity.activeCommandCount === 0 ||
-			!activity.activeCommandLeaseUntil
-		) {
-			return false;
-		}
-
-		const recordedAt = new Date(Math.max(activityAt.getTime(), activity.lastActivityAt.getTime()));
-		const newLeaseUntil = new Date(recordedAt.getTime() + commandTimeoutMs + 60_000);
-		const result = await this.table.update(
-			{ actorId, lastActivityAt: activity.lastActivityAt, suspensionClaimedAt: IsNull() },
-			{
-				lastActivityAt: recordedAt,
-				activeCommandLeaseUntil: new Date(
-					Math.max(activity.activeCommandLeaseUntil.getTime(), newLeaseUntil.getTime()),
-				),
-			},
-		);
-		return (result.affected ?? 0) > 0;
-	}
-
-	async recordCommandFinished(
-		actorId: string,
-		activityAt = new Date(),
-	): Promise<SubstrateActorCommandCompletion | undefined> {
-		for (;;) {
-			const activity = await this.table.findOneBy({ actorId });
-			if (!activity || activity.suspensionClaimedAt) return;
-			const recordedAt = new Date(
-				Math.max(activityAt.getTime(), activity.lastActivityAt.getTime()),
-			);
-
-			const hasActiveCommands =
-				activity.activeCommandCount > 0 &&
-				activity.activeCommandLeaseUntil !== null &&
-				activity.activeCommandLeaseUntil.getTime() > recordedAt.getTime();
-			const remainingCommandCount = hasActiveCommands
-				? Math.max(0, activity.activeCommandCount - 1)
-				: 0;
-			const shouldStop =
-				activity.activeCommandCount > 0 &&
-				remainingCommandCount === 0 &&
-				activity.autoStopMinutes > 0;
-			const result = await this.table.update(
-				{ actorId, lastActivityAt: activity.lastActivityAt, suspensionClaimedAt: IsNull() },
-				{
-					lastActivityAt: recordedAt,
-					lastSuspendedAt: null,
-					activeCommandCount: remainingCommandCount,
-					activeCommandLeaseUntil:
-						remainingCommandCount > 0 ? new Date(recordedAt.getTime() + 60_000) : null,
-				},
-			);
-			if ((result.affected ?? 0) > 0) {
-				if (!shouldStop) return;
-				return {
-					actorId,
-					activityAt: recordedAt,
-					action: activity.ephemeral ? 'delete' : 'suspend',
-				};
-			}
-		}
-	}
-
-	async claimCommandFinishedActor(
-		actorId: string,
-		claimedAt: Date,
-	): Promise<SubstrateActorSuspensionClaim | undefined> {
-		for (;;) {
-			const activity = await this.table.findOneBy({ actorId });
-			if (
-				!activity ||
-				activity.suspensionClaimedAt ||
-				activity.lastSuspendedAt !== null ||
-				activity.activeCommandCount !== 0 ||
-				(activity.activeCommandLeaseUntil !== null &&
-					activity.activeCommandLeaseUntil.getTime() > claimedAt.getTime()) ||
-				activity.autoStopMinutes <= 0
-			) {
-				return;
-			}
-
-			const result = await this.table.update(
-				{
-					actorId,
-					lastActivityAt: activity.lastActivityAt,
-					lastSuspendedAt: IsNull(),
-					suspensionClaimedAt: IsNull(),
-					activeCommandCount: 0,
-				},
-				{ suspensionClaimedAt: claimedAt, activeCommandLeaseUntil: null },
-			);
-			if ((result.affected ?? 0) > 0) {
-				return {
-					actorId,
-					activityAt: activity.lastActivityAt,
-					claimedAt,
-					action: activity.ephemeral ? 'delete' : 'suspend',
-				};
-			}
-		}
-	}
-
-	async deleteIfUnchanged(
-		actorId: string,
-		expectedActivityAt: Date,
-		claimedAt?: Date,
-	): Promise<boolean> {
-		const result = await this.table.delete({
-			actorId,
-			lastActivityAt: expectedActivityAt,
-			...(claimedAt ? { suspensionClaimedAt: claimedAt } : {}),
-		});
-		return (result.affected ?? 0) > 0;
+		return await this.rows.find();
 	}
 
 	async deleteActor(actorId: string): Promise<void> {
-		await this.table.delete({ actorId });
+		await this.rows.delete({ actorId });
 	}
 }

@@ -9,11 +9,16 @@
 | actorId | varchar(63) |  | false |  |  |  |
 | autoDeleteMinutes | double precision |  | false |  |  |  |
 | autoStopMinutes | double precision |  | false |  |  |  |
+| claimToken | uuid |  | true |  |  | Unique owner of a suspend or delete claim. |
+| claimUntil | timestamp(3) with time zone |  | true |  |  |  |
 | connectionFingerprint | varchar(64) |  | false |  |  |  |
 | createdAt | timestamp(3) with time zone | CURRENT_TIMESTAMP(3) | false |  |  |  |
 | ephemeral | boolean | false | false |  |  |  |
 | lastActivityAt | timestamp(3) with time zone |  | false |  |  |  |
 | lastSuspendedAt | timestamp(3) with time zone |  | true |  |  |  |
+| operationLeases | json | '{}'::json | false |  |  | Operation IDs mapped to lease expiry times in Unix milliseconds. |
+| revision | integer | 0 | false |  |  | Compare-and-set revision for Actor lifecycle changes. |
+| suspendAfter | timestamp(3) with time zone |  | true |  |  |  |
 | suspensionClaimedAt | timestamp(3) with time zone |  | true |  |  |  |
 | updatedAt | timestamp(3) with time zone | CURRENT_TIMESTAMP(3) | false |  |  |  |
 
@@ -30,6 +35,8 @@
 | substrate_actor_activity_createdAt_not_null | n | NOT NULL "createdAt" |
 | substrate_actor_activity_ephemeral_not_null | n | NOT NULL ephemeral |
 | substrate_actor_activity_lastActivityAt_not_null | n | NOT NULL "lastActivityAt" |
+| substrate_actor_activity_operationLeases_not_null | n | NOT NULL "operationLeases" |
+| substrate_actor_activity_revision_not_null | n | NOT NULL revision |
 | substrate_actor_activity_updatedAt_not_null | n | NOT NULL "updatedAt" |
 
 ## Indexes
@@ -51,11 +58,16 @@ erDiagram
   varchar_63_ actorId
   double_precision autoDeleteMinutes
   double_precision autoStopMinutes
+  uuid claimToken
+  timestamp_3__with_time_zone claimUntil
   varchar_64_ connectionFingerprint
   timestamp_3__with_time_zone createdAt
   boolean ephemeral
   timestamp_3__with_time_zone lastActivityAt
   timestamp_3__with_time_zone lastSuspendedAt
+  json operationLeases
+  integer revision
+  timestamp_3__with_time_zone suspendAfter
   timestamp_3__with_time_zone suspensionClaimedAt
   timestamp_3__with_time_zone updatedAt
 }

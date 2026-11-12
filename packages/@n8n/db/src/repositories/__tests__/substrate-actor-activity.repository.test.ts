@@ -1,212 +1,84 @@
 import { Container } from '@n8n/di';
-import { IsNull, LessThanOrEqual } from '@n8n/typeorm';
+import type { Repository } from '@n8n/typeorm';
+import { mock } from 'vitest-mock-extended';
 
 import { SubstrateActorActivity } from '../../entities/substrate-actor-activity';
 import { mockEntityManager } from '../../utils/test-utils/mock-entity-manager';
 import { SubstrateActorActivityRepository } from '../substrate-actor-activity.repository';
 
-describe('SubstrateActorActivityRepository', () => {
-	const entityManager = mockEntityManager(SubstrateActorActivity);
+describe('Substrate Actor operation revisions', () => {
+	const manager = mockEntityManager(SubstrateActorActivity);
+	const rows = mock<Repository<SubstrateActorActivity>>();
 	const repository = Container.get(SubstrateActorActivityRepository);
-	const activityAt = new Date('2026-11-11T12:00:00.000Z');
-	const activity = {
-		actorId: 'n8n-test-actor',
-		lastActivityAt: new Date('2026-11-11T11:59:00.000Z'),
+	const now = new Date('2026-11-12T12:00:00Z');
+	const activity = mock<SubstrateActorActivity>({
+		actorId: 'n8n-test',
+		revision: 1,
+		connectionFingerprint: 'connection',
+		operationLeases: {},
+		lastActivityAt: now,
 		lastSuspendedAt: null,
+		suspendAfter: new Date(now.getTime() - 1),
+		claimUntil: null,
+		claimToken: null,
 		suspensionClaimedAt: null,
 		activeCommandCount: 0,
 		activeCommandLeaseUntil: null,
 		autoStopMinutes: 5,
+		autoDeleteMinutes: -1,
 		ephemeral: false,
-	} as SubstrateActorActivity;
+	});
 
 	beforeEach(() => {
 		vi.resetAllMocks();
+		manager.getRepository.mockReturnValue(rows);
 	});
 
-	it('records a command lease with a compare-and-set activity timestamp', async () => {
-		entityManager.findOneBy.mockResolvedValueOnce(activity);
-		entityManager.update.mockResolvedValueOnce({ affected: 1, generatedMaps: [], raw: [] });
-
-		await expect(
-			repository.recordCommandStarted(activity.actorId, 600_000, activityAt),
-		).resolves.toBe(true);
-
-		const [, criteria, update] = entityManager.update.mock.calls[0] ?? [];
-		expect(criteria).toEqual({
-			actorId: activity.actorId,
-			lastActivityAt: activity.lastActivityAt,
-			suspensionClaimedAt: IsNull(),
-		});
-		expect(update).toMatchObject({
-			lastActivityAt: activityAt,
-			activeCommandCount: 1,
-			activeCommandLeaseUntil: new Date(activityAt.getTime() + 660_000),
-		});
-	});
-
-	it('does not start a command while suspension is claimed', async () => {
-		entityManager.findOneBy.mockResolvedValueOnce({
-			...activity,
-			suspensionClaimedAt: activityAt,
-		});
-
-		await expect(
-			repository.recordCommandStarted(activity.actorId, 600_000, activityAt),
-		).resolves.toBe(false);
-		expect(entityManager.update).not.toHaveBeenCalled();
-	});
-
-	it('does not create a suspension candidate when auto-stop is disabled', async () => {
-		entityManager.findOneBy.mockResolvedValueOnce({
-			...activity,
-			activeCommandCount: 1,
-			activeCommandLeaseUntil: new Date(activityAt.getTime() + 660_000),
-			autoStopMinutes: 0,
-		});
-		entityManager.update.mockResolvedValueOnce({ affected: 1, generatedMaps: [], raw: [] });
-
-		await expect(
-			repository.recordCommandFinished(activity.actorId, activityAt),
-		).resolves.toBeUndefined();
-		expect(entityManager.update.mock.calls[0]?.[2]).toMatchObject({
-			activeCommandCount: 0,
-			activeCommandLeaseUntil: null,
-		});
-	});
-
-	it('claims suspension only when no live command lease exists', async () => {
-		entityManager.update.mockResolvedValue({ affected: 0, generatedMaps: [], raw: [] });
-		const claimedAt = new Date('2026-11-11T12:00:00.000Z');
-
-		await expect(
-			repository.claimIdleActor(
-				activity.actorId,
-				activity.lastActivityAt,
-				null,
-				claimedAt,
-				claimedAt,
-			),
-		).resolves.toBe(false);
-
-		const criteria = entityManager.update.mock.calls.map(([, where]) => where);
-		expect(criteria).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({ activeCommandCount: 0 }),
-				expect.objectContaining({ activeCommandLeaseUntil: IsNull() }),
-				expect.objectContaining({ activeCommandLeaseUntil: LessThanOrEqual(claimedAt) }),
-			]),
-		);
-	});
-
-	it('returns a suspension candidate when the final running command exits', async () => {
-		entityManager.findOneBy.mockResolvedValueOnce({
-			...activity,
-			activeCommandCount: 1,
-			activeCommandLeaseUntil: new Date(activityAt.getTime() + 660_000),
-		});
-		entityManager.update.mockResolvedValueOnce({ affected: 1, generatedMaps: [], raw: [] });
-
-		await expect(repository.recordCommandFinished(activity.actorId, activityAt)).resolves.toEqual({
-			actorId: activity.actorId,
-			activityAt,
-			action: 'suspend',
-		});
-
-		expect(entityManager.update.mock.calls[0]?.[2]).toMatchObject({
-			lastActivityAt: activityAt,
-			lastSuspendedAt: null,
-			activeCommandCount: 0,
-			activeCommandLeaseUntil: null,
-		});
-	});
-
-	it('retries a command finish claim against newer activity', async () => {
-		const claimedAt = new Date('2026-11-11T12:00:05.000Z');
-		const newerActivityAt = new Date('2026-11-11T12:00:03.000Z');
-		entityManager.findOneBy
+	it('retries a lost revision even when activity timestamps are identical', async () => {
+		rows.findOneBy
 			.mockResolvedValueOnce(activity)
-			.mockResolvedValueOnce({ ...activity, lastActivityAt: newerActivityAt });
-		entityManager.update
+			.mockResolvedValueOnce({ ...activity, revision: 2 });
+		rows.update
 			.mockResolvedValueOnce({ affected: 0, generatedMaps: [], raw: [] })
 			.mockResolvedValueOnce({ affected: 1, generatedMaps: [], raw: [] });
-
-		await expect(
-			repository.claimCommandFinishedActor(activity.actorId, claimedAt),
-		).resolves.toEqual({
-			actorId: activity.actorId,
-			activityAt: newerActivityAt,
-			claimedAt,
-			action: 'suspend',
-		});
+		const claim = await repository.claimDueActor('n8n-test', 'connection', 'claim-1', now);
+		expect(claim?.claimToken).toBe('claim-1');
+		expect(rows.update.mock.calls.map(([where]) => where)).toEqual([
+			{ actorId: 'n8n-test', revision: 1 },
+			{ actorId: 'n8n-test', revision: 2 },
+		]);
 	});
 
-	it('does not claim a command finish while another command is active', async () => {
-		entityManager.findOneBy.mockResolvedValueOnce({
+	it('does not delete a newer operation when an old finish is duplicated', async () => {
+		rows.findOneBy.mockResolvedValueOnce({
 			...activity,
-			activeCommandCount: 1,
-			activeCommandLeaseUntil: new Date(activityAt.getTime() + 660_000),
+			operationLeases: { newer: now.getTime() + 60_000 },
 		});
-
-		await expect(
-			repository.claimCommandFinishedActor(activity.actorId, activityAt),
-		).resolves.toBeUndefined();
-		expect(entityManager.update).not.toHaveBeenCalled();
+		expect(await repository.finishOperation('n8n-test', 'older', 5_000, now)).toBeNull();
+		expect(rows.update).not.toHaveBeenCalled();
 	});
 
-	it('does not claim a command finish while its command lease is still live', async () => {
-		entityManager.findOneBy.mockResolvedValueOnce({
-			...activity,
-			activeCommandLeaseUntil: new Date(activityAt.getTime() + 60_000),
-		});
-
-		await expect(
-			repository.claimCommandFinishedActor(activity.actorId, activityAt),
-		).resolves.toBeUndefined();
-		expect(entityManager.update).not.toHaveBeenCalled();
+	it.each([
+		{ operationLeases: { upload: now.getTime() + 60_000 } },
+		{ suspendAfter: new Date(now.getTime() + 1) },
+		{ activeCommandCount: 1, activeCommandLeaseUntil: new Date(now.getTime() + 60_000) },
+		{ claimToken: 'owner', suspensionClaimedAt: now, claimUntil: new Date(now.getTime() + 60_000) },
+	])('does not claim protected or not-yet-due work: %j', async (overrides) => {
+		rows.findOneBy.mockResolvedValueOnce({ ...activity, ...overrides });
+		expect(
+			await repository.claimDueActor('n8n-test', 'connection', 'claim-1', now),
+		).toBeUndefined();
+		expect(rows.update).not.toHaveBeenCalled();
 	});
 
-	it('does not claim a command finish when the Actor is already suspended', async () => {
-		entityManager.findOneBy.mockResolvedValueOnce({
-			...activity,
-			lastSuspendedAt: activityAt,
-		});
-
-		await expect(
-			repository.claimCommandFinishedActor(activity.actorId, activityAt),
-		).resolves.toBeUndefined();
-		expect(entityManager.update).not.toHaveBeenCalled();
-	});
-
-	it('returns a delete claim for an ephemeral Actor', async () => {
-		entityManager.findOneBy.mockResolvedValueOnce({ ...activity, ephemeral: true });
-		entityManager.update.mockResolvedValueOnce({ affected: 1, generatedMaps: [], raw: [] });
-
-		await expect(
-			repository.claimCommandFinishedActor(activity.actorId, activityAt),
-		).resolves.toEqual({
-			actorId: activity.actorId,
-			activityAt: activity.lastActivityAt,
-			claimedAt: activityAt,
-			action: 'delete',
-		});
-	});
-
-	it('keeps the remaining command lease when another command finishes', async () => {
-		entityManager.findOneBy.mockResolvedValueOnce({
-			...activity,
-			activeCommandCount: 2,
-			activeCommandLeaseUntil: new Date(activityAt.getTime() + 660_000),
-		});
-		entityManager.update.mockResolvedValueOnce({ affected: 1, generatedMaps: [], raw: [] });
-
-		await expect(
-			repository.recordCommandFinished(activity.actorId, activityAt),
-		).resolves.toBeUndefined();
-		const update = entityManager.update.mock.calls[0]?.[2];
-		expect(update).toMatchObject({
-			activeCommandCount: 1,
-		});
-		expect(update).not.toHaveProperty('suspensionClaimedAt');
+	it('ignores completion from a previous claim owner', async () => {
+		rows.findOneBy.mockResolvedValueOnce({ ...activity, claimToken: 'new-owner' });
+		expect(
+			await repository.completeClaim(
+				{ actorId: 'n8n-test', claimToken: 'old-owner', action: 'suspend' },
+				now,
+			),
+		).toBe(false);
+		expect(rows.update).not.toHaveBeenCalled();
 	});
 });

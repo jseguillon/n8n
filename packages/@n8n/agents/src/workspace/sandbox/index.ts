@@ -33,7 +33,7 @@ export type {
 	SandboxInstance,
 	SandboxFilesystem,
 	CreateSandboxOptions,
-	SubstrateCommandActivityPhase,
+	SubstrateOperationRecorder,
 	DaytonaSandboxConfig,
 	N8nSandboxConfig,
 	SubstrateSandboxConfig,

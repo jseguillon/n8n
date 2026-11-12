@@ -52,7 +52,6 @@ export class N8nSandboxFilesystem extends BaseFilesystem {
 		await this.ensureReady();
 		return await raceWithAbort(async () => {
 			if (this.sandbox instanceof SubstrateSandbox) {
-				await this.sandbox.ensureRunning({ abortSignal });
 				return await op(this.sandbox.getFileClient(abortSignal), this.sandbox.id);
 			}
 			return await this.sandbox.withClient(op, { abortSignal });

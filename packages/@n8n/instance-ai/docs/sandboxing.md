@@ -78,8 +78,9 @@ it stops, which supersedes the auto-delete interval. For Substrate, it deletes
 the Actor when the in-process thread cache expires.
 
 When auto-stop is enabled, Substrate waits for the configured command suspend
-delay after its final command exits or times out. The delay defaults to 5 seconds.
-A new command during this interval cancels the pending suspension. n8n then
+delay after its final command or file operation finishes. The delay defaults to
+5 seconds. File downloads hold an operation lease until all data is read. A new
+operation during this interval cancels the pending suspension. n8n then
 suspends the Actor, snapshots its state, and releases its worker. An hourly
 cluster-leader task is the recovery path for command-exit cleanup missed during an
 n8n restart. It suspends Actors after their configured auto-stop interval and

@@ -20,7 +20,7 @@ export class GenericConfig {
 	@Env('N8N_GRACEFUL_SHUTDOWN_TIMEOUT')
 	gracefulShutdownTimeout: number = 30;
 
-	/** Time in milliseconds to wait after a Substrate command completes before n8n suspends its Actor. Set to 0 to suspend immediately. */
+	/** Time in milliseconds to wait after the final Substrate command or file operation completes before n8n suspends its Actor. Set to 0 to suspend immediately. */
 	@Env('N8N_SUBSTRATE_SANDBOX_SUSPEND_DELAY_MS', nonnegativeIntSchema)
 	substrateSandboxSuspendDelayMs: number = 5_000;
 }

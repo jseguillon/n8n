@@ -134,20 +134,19 @@ export interface SubstrateSandboxConfig extends EnabledSandboxConfigBase {
 	provider: 'substrate';
 	id?: string;
 	connection: import('./substrate-control').SubstrateConnection;
-	/** Persist the last use of an Actor so a host lifecycle task can reclaim it. */
-	onActivity?: (actorId: string, abortSignal?: AbortSignal) => Promise<void>;
-	/** Keep an Actor protected from idle cleanup while a command tool is running. */
-	onCommandActivity?: (
-		actorId: string,
-		phase: SubstrateCommandActivityPhase,
-		commandTimeoutMs: number,
-		abortSignal?: AbortSignal,
-	) => Promise<boolean>;
+	/** Hold an operation lease until a command or file transfer completes. */
+	onOperation?: SubstrateOperationRecorder;
 	/** Remove persisted activity after the Actor is deleted. */
 	onDestroyed?: (actorId: string) => Promise<void>;
 }
 
-export type SubstrateCommandActivityPhase = 'started' | 'heartbeat' | 'finished';
+export type SubstrateOperationRecorder = (
+	actorId: string,
+	operationId: string,
+	phase: 'started' | 'heartbeat' | 'finished',
+	timeoutMs: number,
+	abortSignal?: AbortSignal,
+) => Promise<boolean>;
 
 export type SandboxConfig =
 	| DisabledSandboxConfig

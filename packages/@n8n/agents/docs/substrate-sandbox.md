@@ -68,12 +68,16 @@ Verification workspaces are deleted after the probe.
 Agent workspaces use the existing project, Agent, and principal identity.
 Assistant workspaces use a thread-derived identity.
 n8n records Substrate Actor activity in its database. When automatic suspension
-is enabled, n8n waits for the configured command suspend delay after the final
-command exits or times out. The delay defaults to 5 seconds. A new command during
-this interval cancels the pending suspension. n8n then suspends a persistent
-Actor or deletes an ephemeral Actor without keeping a snapshot.
-An in-flight command holds an activity lease, so cleanup cannot suspend its
-Actor. The command timeout still applies independently of the suspend behavior.
+is enabled, n8n records completion immediately and sets a separate suspension
+deadline after the final command or file operation finishes. The delay defaults
+to 5 seconds. A new operation cancels the deadline and starts a new grace period
+when that operation finishes. n8n then suspends a persistent Actor or deletes an
+ephemeral Actor without keeping a snapshot.
+Each operation has its own persisted lease. File reads hold their lease until
+the response body is consumed. Cleanup claims use a database revision and a
+unique owner token. Duplicate completions cannot release another operation's
+lease, and an expired claim owner cannot complete a newer claim.
+The command timeout still applies independently of the suspend behavior.
 If the execution stream disconnects, n8n resumes it by execution ID instead of
 starting the command again.
 
@@ -81,6 +85,11 @@ A cluster-leader task runs once per hour as a recovery check for Actors whose
 command-exit cleanup was missed, for example after an n8n restart. It uses the
 configured auto-stop interval and deletes suspended Actors after their retention
 interval.
+
+The coordinator migration preserves existing activity rows and legacy command
+leases. It adds operation leases, revisions, suspension deadlines, and claim
+ownership. Update all main processes together before using the new coordinator;
+older processes do not participate in its revision checks.
 
 Instance AI uses `N8N_INSTANCE_AI_SANDBOX_AUTO_STOP_MINUTES` (default 15) and
 `N8N_INSTANCE_AI_SANDBOX_AUTO_DELETE_MINUTES` (default 10080). Agent workspaces

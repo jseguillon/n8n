@@ -1,17 +1,16 @@
-import { createHash } from 'node:crypto';
-import { setTimeout as wait } from 'node:timers/promises';
+import { createHash, randomUUID } from 'node:crypto';
 
+import {
+	createSandbox,
+	type SubstrateOperationRecorder,
+	type SubstrateSandboxConfig,
+} from '@n8n/agents/sandbox';
 import { Logger } from '@n8n/backend-common';
 import { GlobalConfig } from '@n8n/config';
-import { SubstrateActorActivityRepository, type SubstrateActorSuspensionClaim } from '@n8n/db';
+import { SubstrateActorActivityRepository, type SubstrateActorActivityInput } from '@n8n/db';
 import { Service } from '@n8n/di';
-import { createSandbox } from '@n8n/agents/sandbox';
-import type { SubstrateCommandActivityPhase, SubstrateSandboxConfig } from '@n8n/agents/sandbox';
 
 import { SandboxSettingsService } from './sandbox-settings.service';
-
-const ACTOR_ID_PREFIX = 'n8n-';
-const SUSPENSION_CLAIM_LEASE_MS = 10 * 60_000;
 
 export type SubstrateActorLifecyclePolicy = {
 	autoStopMinutes: number;
@@ -35,6 +34,8 @@ function connectionFingerprint(connection: SubstrateSandboxConfig['connection'])
 
 @Service()
 export class SubstrateActorLifecycleService {
+	private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
+
 	constructor(
 		private readonly activityRepository: SubstrateActorActivityRepository,
 		private readonly sandboxSettingsService: SandboxSettingsService,
@@ -42,300 +43,134 @@ export class SubstrateActorLifecycleService {
 		private readonly globalConfig: GlobalConfig,
 	) {}
 
-	createActivityRecorder(
+	createOperationRecorder(
 		connection: SubstrateSandboxConfig['connection'],
 		policy: SubstrateActorLifecyclePolicy,
-	): (actorId: string, abortSignal?: AbortSignal) => Promise<void> {
+	): SubstrateOperationRecorder {
 		const fingerprint = connectionFingerprint(connection);
-		return async (actorId, abortSignal) => {
-			const input = {
-				actorId,
-				connectionFingerprint: fingerprint,
-				autoStopMinutes: policy.autoStopMinutes,
-				autoDeleteMinutes: policy.autoDeleteMinutes,
-				ephemeral: policy.ephemeral,
-			};
-			while (true) {
-				abortSignal?.throwIfAborted();
-				if (await this.activityRepository.recordActivity(input)) return;
-				await wait(100, undefined, abortSignal ? { signal: abortSignal } : undefined);
-			}
-		};
-	}
-
-	createCommandActivityRecorder(
-		connection: SubstrateSandboxConfig['connection'],
-		policy: SubstrateActorLifecyclePolicy,
-	): (
-		actorId: string,
-		phase: SubstrateCommandActivityPhase,
-		commandTimeoutMs: number,
-		abortSignal?: AbortSignal,
-	) => Promise<boolean> {
-		const recordActivity = this.createActivityRecorder(connection, policy);
-		return async (actorId, phase, commandTimeoutMs, abortSignal) => {
+		return async (actorId, operationId, phase, timeoutMs, abortSignal) => {
 			if (phase === 'started') {
-				await recordActivity(actorId, abortSignal);
-				return await this.activityRepository.recordCommandStarted(actorId, commandTimeoutMs);
+				abortSignal?.throwIfAborted();
+				const input: SubstrateActorActivityInput = {
+					actorId,
+					connectionFingerprint: fingerprint,
+					...policy,
+				};
+				const started = await this.activityRepository.startOperation(
+					input,
+					operationId,
+					timeoutMs + 60_000,
+				);
+				if (started) this.cancelTimer(actorId);
+				return started;
 			}
-			if (phase === 'heartbeat') {
-				return await this.activityRepository.recordCommandHeartbeat(actorId, commandTimeoutMs);
-			}
-			const finishedAt = new Date();
-			const delayMs =
-				policy.autoStopMinutes > 0 ? this.globalConfig.generic.substrateSandboxSuspendDelayMs : 0;
-			if (delayMs > 0) {
-				void this.finishCommandAfterDelay(connection, policy, actorId, finishedAt, delayMs);
-			} else {
-				await this.finishCommandAfterDelay(connection, policy, actorId, finishedAt, 0);
-			}
+			if (phase === 'heartbeat')
+				return await this.activityRepository.heartbeatOperation(
+					actorId,
+					operationId,
+					timeoutMs + 60_000,
+				);
+			const deadline = await this.activityRepository.finishOperation(
+				actorId,
+				operationId,
+				this.globalConfig.generic.substrateSandboxSuspendDelayMs,
+			);
+			if (deadline) this.schedule(actorId, connection, deadline);
 			return true;
 		};
 	}
 
-	private async finishCommandAfterDelay(
-		connection: SubstrateSandboxConfig['connection'],
-		policy: SubstrateActorLifecyclePolicy,
-		actorId: string,
-		finishedAt: Date,
-		delayMs: number,
-	): Promise<void> {
-		try {
-			if (delayMs > 0) await wait(delayMs);
-			const completion = await this.activityRepository.recordCommandFinished(actorId, finishedAt);
-			if (!completion) return;
-
-			const claim = await this.activityRepository.claimCommandFinishedActor(
-				completion.actorId,
-				new Date(),
-			);
-			if (claim) void this.finishCommandLifecycle(connection, policy, claim);
-		} catch (error) {
-			this.logger.warn('Failed to finish Substrate Actor command cleanup', {
-				actorId,
-				error: error instanceof Error ? error.message : String(error),
-			});
-		}
+	private cancelTimer(actorId: string) {
+		clearTimeout(this.timers.get(actorId));
+		this.timers.delete(actorId);
 	}
 
-	private async finishCommandLifecycle(
+	private schedule(
+		actorId: string,
 		connection: SubstrateSandboxConfig['connection'],
-		policy: SubstrateActorLifecyclePolicy,
-		completion: SubstrateActorSuspensionClaim,
-	): Promise<void> {
+		deadline: Date,
+	) {
+		this.cancelTimer(actorId);
+		const timer = setTimeout(
+			() => {
+				if (this.timers.get(actorId) !== timer) return;
+				// Node timers can fire before the persisted deadline by a millisecond.
+				if (Date.now() < deadline.getTime()) {
+					this.schedule(actorId, connection, deadline);
+					return;
+				}
+				this.timers.delete(actorId);
+				void this.reclaim(actorId, connection).catch((error: unknown) =>
+					this.logFailure(actorId, error),
+				);
+			},
+			Math.max(0, deadline.getTime() - Date.now()),
+		);
+		timer.unref();
+		this.timers.set(actorId, timer);
+	}
+
+	private logFailure(actorId: string, error: unknown) {
+		this.logger.warn('Failed to reclaim a Substrate Actor', {
+			actorId,
+			error: error instanceof Error ? error.message : String(error),
+		});
+	}
+
+	private async reclaim(
+		actorId: string,
+		connection: SubstrateSandboxConfig['connection'],
+		recovery = false,
+		now = new Date(),
+	) {
+		const claim = await this.activityRepository.claimDueActor(
+			actorId,
+			connectionFingerprint(connection),
+			randomUUID(),
+			now,
+			recovery,
+		);
+		if (!claim) return;
 		try {
+			if (!actorId.startsWith('n8n-')) throw new Error('Invalid Substrate Actor ID');
+			// The RPC deadline is shorter than the database claim lease.
 			const sandbox = await createSandbox({
 				enabled: true,
 				provider: 'substrate',
 				connection,
-				id: this.unprefixActorId(completion.actorId),
+				id: actorId.slice(4),
 				ephemeral: false,
-				onActivity: undefined,
-				onCommandActivity: undefined,
+				timeout: 60_000,
 			});
-			if (!sandbox) {
-				await this.activityRepository.releaseSuspensionClaim(
-					completion.actorId,
-					completion.claimedAt,
-				);
-				return;
-			}
-
-			const destroy = sandbox.destroy?.bind(sandbox);
-			if (completion.action === 'delete') {
-				if (!destroy) {
-					await this.activityRepository.releaseSuspensionClaim(
-						completion.actorId,
-						completion.claimedAt,
-					);
-					return;
-				}
-				await destroy();
-				const deleted = await this.activityRepository.deleteIfUnchanged(
-					completion.actorId,
-					completion.activityAt,
-					completion.claimedAt,
-				);
-				if (!deleted) {
-					await this.activityRepository.releaseSuspensionClaim(
-						completion.actorId,
-						completion.claimedAt,
-					);
-				}
-				return;
-			}
-
-			const stop = sandbox.stop?.bind(sandbox);
-			if (!stop) {
-				await this.activityRepository.releaseSuspensionClaim(
-					completion.actorId,
-					completion.claimedAt,
-				);
-				return;
-			}
-			await stop();
-			const markedSuspended = await this.activityRepository.markSuspended(
-				completion.actorId,
-				completion.activityAt,
-				completion.claimedAt,
-				new Date(),
-				policy.autoDeleteMinutes !== 0,
-			);
-			if (!markedSuspended) {
-				await this.activityRepository.releaseSuspensionClaim(
-					completion.actorId,
-					completion.claimedAt,
-				);
-				return;
-			}
-			if (policy.autoDeleteMinutes === 0) {
-				if (!destroy) {
-					await this.activityRepository.releaseSuspensionClaim(
-						completion.actorId,
-						completion.claimedAt,
-					);
-					return;
-				}
-				await destroy();
-				const deleted = await this.activityRepository.deleteIfUnchanged(
-					completion.actorId,
-					completion.activityAt,
-					completion.claimedAt,
-				);
-				if (!deleted) {
-					await this.activityRepository.releaseSuspensionClaim(
-						completion.actorId,
-						completion.claimedAt,
-					);
-				}
-			}
+			if (!sandbox) throw new Error('Substrate sandbox is unavailable');
+			const reclaim =
+				claim.action === 'delete' ? sandbox.destroy?.bind(sandbox) : sandbox.stop?.bind(sandbox);
+			if (!reclaim) throw new Error('Substrate lifecycle action is unavailable');
+			await reclaim();
+			await this.activityRepository.completeClaim(claim);
 		} catch (error) {
-			await this.activityRepository
-				.releaseSuspensionClaim(completion.actorId, completion.claimedAt)
-				.catch(() => undefined);
-			this.logger.warn('Failed to reclaim a Substrate Actor after its command finished', {
-				actorId: completion.actorId,
-				error: error instanceof Error ? error.message : String(error),
-			});
+			await this.activityRepository.releaseClaim(claim).catch(() => undefined);
+			this.logFailure(actorId, error);
 		}
 	}
 
 	async forgetActor(actorId: string): Promise<void> {
+		this.cancelTimer(actorId);
 		await this.activityRepository.deleteActor(actorId);
 	}
 
 	async cleanupIdleActors(signal?: AbortSignal, now = Date.now()): Promise<void> {
 		if (this.sandboxSettingsService.getProvider() !== 'substrate') return;
-		await this.activityRepository.releaseExpiredSuspensionClaims(
-			new Date(now - SUSPENSION_CLAIM_LEASE_MS),
-		);
-		const activities = await this.activityRepository.findAll();
-		if (activities.length === 0 || signal?.aborted) return;
-
 		const config = await this.sandboxSettingsService.getSubstrateConfig();
 		const fingerprint = connectionFingerprint(config.connection);
-		for (const activity of activities) {
+		for (const activity of await this.activityRepository.findAll()) {
 			if (signal?.aborted) return;
 			if (activity.connectionFingerprint !== fingerprint) continue;
-
-			const idleForMs = now - activity.lastActivityAt.getTime();
-			const shouldStop =
-				activity.lastSuspendedAt === null &&
-				activity.autoStopMinutes > 0 &&
-				idleForMs >= activity.autoStopMinutes * 60_000;
-			const shouldDelete = activity.ephemeral
-				? shouldStop
-				: activity.lastSuspendedAt !== null &&
-					activity.autoDeleteMinutes >= 0 &&
-					now - activity.lastSuspendedAt.getTime() >= activity.autoDeleteMinutes * 60_000;
-
-			if (!shouldStop && !shouldDelete) continue;
-
-			const claimedAt = new Date(now);
-			let claimed = false;
 			try {
-				const sandbox = await createSandbox({
-					...config,
-					id: this.unprefixActorId(activity.actorId),
-					ephemeral: false,
-					onActivity: undefined,
-					onCommandActivity: undefined,
-				});
-				if (!sandbox) continue;
-				claimed = await this.activityRepository.claimIdleActor(
-					activity.actorId,
-					activity.lastActivityAt,
-					activity.lastSuspendedAt,
-					claimedAt,
-					new Date(now),
-				);
-				if (!claimed) continue;
-				const destroy = sandbox.destroy?.bind(sandbox);
-
-				if (shouldDelete) {
-					if (!destroy) {
-						await this.activityRepository.releaseSuspensionClaim(activity.actorId, claimedAt);
-						continue;
-					}
-					await destroy();
-					const deleted = await this.activityRepository.deleteIfUnchanged(
-						activity.actorId,
-						activity.lastActivityAt,
-						claimedAt,
-					);
-					if (!deleted)
-						await this.activityRepository.releaseSuspensionClaim(activity.actorId, claimedAt);
-					continue;
-				}
-
-				// This adapter is fresh, so BaseSandbox._stop() would no-op while it is pending.
-				const stop = sandbox.stop?.bind(sandbox);
-				if (!stop) {
-					await this.activityRepository.releaseSuspensionClaim(activity.actorId, claimedAt);
-					continue;
-				}
-				await stop();
-				const markedSuspended = await this.activityRepository.markSuspended(
-					activity.actorId,
-					activity.lastActivityAt,
-					claimedAt,
-					new Date(now),
-					activity.autoDeleteMinutes !== 0,
-				);
-				if (markedSuspended && activity.autoDeleteMinutes === 0) {
-					if (!destroy) {
-						await this.activityRepository.releaseSuspensionClaim(activity.actorId, claimedAt);
-						continue;
-					}
-					await destroy();
-					const deleted = await this.activityRepository.deleteIfUnchanged(
-						activity.actorId,
-						activity.lastActivityAt,
-						claimedAt,
-					);
-					if (!deleted)
-						await this.activityRepository.releaseSuspensionClaim(activity.actorId, claimedAt);
-				} else if (!markedSuspended) {
-					await this.activityRepository.releaseSuspensionClaim(activity.actorId, claimedAt);
-				}
+				await this.reclaim(activity.actorId, config.connection, true, new Date(now));
 			} catch (error) {
-				if (claimed) {
-					await this.activityRepository
-						.releaseSuspensionClaim(activity.actorId, claimedAt)
-						.catch(() => undefined);
-				}
-				this.logger.warn('Failed to clean up idle Substrate Actor', {
-					actorId: activity.actorId,
-					error: error instanceof Error ? error.message : String(error),
-				});
+				this.logFailure(activity.actorId, error);
 			}
 		}
-	}
-
-	private unprefixActorId(actorId: string): string {
-		if (!actorId.startsWith(ACTOR_ID_PREFIX)) {
-			throw new Error('Invalid Substrate Actor ID');
-		}
-		return actorId.slice(ACTOR_ID_PREFIX.length);
 	}
 }
