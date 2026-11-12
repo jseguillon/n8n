@@ -6,7 +6,7 @@
 <summary><strong>Table Definition</strong></summary>
 
 ```sql
-CREATE TABLE "substrate_actor_activity" ("actorId" varchar(63) PRIMARY KEY NOT NULL, "connectionFingerprint" varchar(64) NOT NULL, "lastActivityAt" datetime(3) NOT NULL, "lastSuspendedAt" datetime(3), "autoStopMinutes" real NOT NULL, "autoDeleteMinutes" real NOT NULL, "ephemeral" boolean NOT NULL DEFAULT (false), "createdAt" datetime(3) NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')), "updatedAt" datetime(3) NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')))
+CREATE TABLE "substrate_actor_activity" ("actorId" varchar(63) PRIMARY KEY NOT NULL, "connectionFingerprint" varchar(64) NOT NULL, "lastActivityAt" datetime(3) NOT NULL, "lastSuspendedAt" datetime(3), "autoStopMinutes" real NOT NULL, "autoDeleteMinutes" real NOT NULL, "ephemeral" boolean NOT NULL DEFAULT (false), "createdAt" datetime(3) NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')), "updatedAt" datetime(3) NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')), "suspensionClaimedAt" datetime(3), "activeCommandCount" integer NOT NULL DEFAULT (0), "activeCommandLeaseUntil" datetime(3))
 ```
 
 </details>
@@ -15,6 +15,8 @@ CREATE TABLE "substrate_actor_activity" ("actorId" varchar(63) PRIMARY KEY NOT N
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
+| activeCommandCount | INTEGER | 0 | false |  |  |  |
+| activeCommandLeaseUntil | datetime(3) |  | true |  |  |  |
 | actorId | varchar(63) |  | false |  |  |  |
 | autoDeleteMinutes | REAL |  | false |  |  |  |
 | autoStopMinutes | REAL |  | false |  |  |  |
@@ -23,6 +25,7 @@ CREATE TABLE "substrate_actor_activity" ("actorId" varchar(63) PRIMARY KEY NOT N
 | ephemeral | boolean | false | false |  |  |  |
 | lastActivityAt | datetime(3) |  | false |  |  |  |
 | lastSuspendedAt | datetime(3) |  | true |  |  |  |
+| suspensionClaimedAt | datetime(3) |  | true |  |  |  |
 | updatedAt | datetime(3) | STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW') | false |  |  |  |
 
 ## Constraints
@@ -46,6 +49,8 @@ erDiagram
 
 
 "substrate_actor_activity" {
+  INTEGER activeCommandCount
+  datetime_3_ activeCommandLeaseUntil
   varchar_63_ actorId PK
   REAL autoDeleteMinutes
   REAL autoStopMinutes
@@ -54,6 +59,7 @@ erDiagram
   boolean ephemeral
   datetime_3_ lastActivityAt
   datetime_3_ lastSuspendedAt
+  datetime_3_ suspensionClaimedAt
   datetime_3_ updatedAt
 }
 ```

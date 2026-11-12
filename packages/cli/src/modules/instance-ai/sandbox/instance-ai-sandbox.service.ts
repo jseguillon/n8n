@@ -215,7 +215,12 @@ export type InstanceAiSubstrateActivityRecorder = (
 	actorId: string,
 	connection: SubstrateSandboxConfig['connection'],
 	policy: SubstrateActorLifecyclePolicy,
+	abortSignal?: AbortSignal,
 ) => Promise<void>;
+export type InstanceAiSubstrateCommandActivityRecorder = (
+	connection: SubstrateSandboxConfig['connection'],
+	policy: SubstrateActorLifecyclePolicy,
+) => NonNullable<SubstrateSandboxConfig['onCommandActivity']>;
 export type InstanceAiSubstrateDestroyRecorder = (actorId: string) => Promise<void>;
 
 /** Proxy collaborator that routes Daytona traffic through the AI assistant service. */
@@ -247,6 +252,7 @@ export type InstanceAiSandboxServiceOptions = {
 		userId?: string,
 	) => Promise<{ userId: string; proxyConfig?: ServiceProxyConfig }>;
 	onSubstrateActivity?: InstanceAiSubstrateActivityRecorder;
+	onSubstrateCommandActivity?: InstanceAiSubstrateCommandActivityRecorder;
 	onSubstrateDestroyed?: InstanceAiSubstrateDestroyRecorder;
 };
 
@@ -432,8 +438,14 @@ export class InstanceAiSandboxService {
 		};
 		return {
 			...config,
-			onActivity: async (actorId) =>
-				await this.options.onSubstrateActivity?.(actorId, config.connection, policy),
+			onActivity: async (actorId, abortSignal) => {
+				if (abortSignal) {
+					await this.options.onSubstrateActivity?.(actorId, config.connection, policy, abortSignal);
+				} else {
+					await this.options.onSubstrateActivity?.(actorId, config.connection, policy);
+				}
+			},
+			onCommandActivity: this.options.onSubstrateCommandActivity?.(config.connection, policy),
 			onDestroyed: this.options.onSubstrateDestroyed,
 		};
 	}

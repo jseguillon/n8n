@@ -32,6 +32,7 @@ function buildSandbox(
 			timeout: config.timeout,
 			ephemeral: config.ephemeral,
 			onActivity: config.onActivity,
+			onCommandActivity: config.onCommandActivity,
 			onDestroyed: config.onDestroyed,
 		});
 	}
