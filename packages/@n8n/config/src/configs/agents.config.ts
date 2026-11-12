@@ -110,11 +110,11 @@ export class AgentsConfig {
 	@Env('N8N_AGENTS_AI_SANDBOX_TIMEOUT')
 	sandboxTimeout: number = 5 * Time.minutes.toMilliseconds;
 
-	/** When true, the sandbox provider deletes the knowledge sandbox once it goes idle. */
+	/** Whether to delete the Agent knowledge sandbox instead of retaining it. For Substrate, n8n deletes the Actor after its final command exits. The n8n sandbox service uses its own idle settings. */
 	@Env('N8N_AGENTS_AI_SANDBOX_EPHEMERAL')
 	sandboxEphemeral: boolean = false;
 
-	/** Minutes an idle Daytona or Substrate Agent workspace waits before it is stopped. `0` disables auto-stop. The n8n sandbox service uses its own idle settings. */
+	/** Minutes an idle Daytona workspace waits before it stops. For Substrate, n8n waits for the configured command suspend delay after the final command exits or times out before suspending. This interval recovers missed cleanup. Set to 0 to disable automatic suspension. The n8n sandbox service uses separate idle settings. */
 	@Env('N8N_AGENTS_AI_SANDBOX_WORKSPACE_AUTO_STOP_MINUTES')
 	sandboxWorkspaceAutoStopMinutes: number = 5;
 
@@ -122,7 +122,7 @@ export class AgentsConfig {
 	@Env('N8N_AGENTS_AI_SANDBOX_WORKSPACE_AUTO_DELETE_MINUTES')
 	sandboxWorkspaceAutoDeleteMinutes: number = 24 * 60;
 
-	/** Minutes an idle Daytona or Substrate Agent knowledge sandbox waits before it is stopped. `0` disables auto-stop. The n8n sandbox service uses its own idle settings. */
+	/** Minutes an idle Daytona knowledge sandbox waits before it stops. For Substrate, n8n waits for the configured command suspend delay after the final command exits or times out before suspending. This interval recovers missed cleanup. Set to 0 to disable automatic suspension. The n8n sandbox service uses separate idle settings. */
 	@Env('N8N_AGENTS_AI_SANDBOX_KNOWLEDGE_AUTO_STOP_MINUTES')
 	sandboxKnowledgeAutoStopMinutes: number = 15;
 

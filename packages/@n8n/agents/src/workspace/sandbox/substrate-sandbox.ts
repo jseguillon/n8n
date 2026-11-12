@@ -260,7 +260,6 @@ export class SubstrateSandbox extends BaseSandbox {
 		options?: ExecuteCommandOptions,
 	): Promise<CommandResult> {
 		const timeout = options?.timeout ?? this.timeout;
-		await this.recordActivity(options?.abortSignal);
 		if (this.options.onCommandActivity) {
 			let started = await this.options.onCommandActivity(
 				this.id,
@@ -282,6 +281,8 @@ export class SubstrateSandbox extends BaseSandbox {
 					options?.abortSignal,
 				);
 			}
+		} else {
+			await this.recordActivity(options?.abortSignal);
 		}
 
 		const heartbeat = setInterval(() => {

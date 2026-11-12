@@ -16,6 +16,8 @@ describe('SubstrateActorActivityRepository', () => {
 		suspensionClaimedAt: null,
 		activeCommandCount: 0,
 		activeCommandLeaseUntil: null,
+		autoStopMinutes: 5,
+		ephemeral: false,
 	} as SubstrateActorActivity;
 
 	beforeEach(() => {
@@ -43,6 +45,36 @@ describe('SubstrateActorActivityRepository', () => {
 		});
 	});
 
+	it('does not start a command while suspension is claimed', async () => {
+		entityManager.findOneBy.mockResolvedValueOnce({
+			...activity,
+			suspensionClaimedAt: activityAt,
+		});
+
+		await expect(
+			repository.recordCommandStarted(activity.actorId, 600_000, activityAt),
+		).resolves.toBe(false);
+		expect(entityManager.update).not.toHaveBeenCalled();
+	});
+
+	it('does not create a suspension candidate when auto-stop is disabled', async () => {
+		entityManager.findOneBy.mockResolvedValueOnce({
+			...activity,
+			activeCommandCount: 1,
+			activeCommandLeaseUntil: new Date(activityAt.getTime() + 660_000),
+			autoStopMinutes: 0,
+		});
+		entityManager.update.mockResolvedValueOnce({ affected: 1, generatedMaps: [], raw: [] });
+
+		await expect(
+			repository.recordCommandFinished(activity.actorId, activityAt),
+		).resolves.toBeUndefined();
+		expect(entityManager.update.mock.calls[0]?.[2]).toMatchObject({
+			activeCommandCount: 0,
+			activeCommandLeaseUntil: null,
+		});
+	});
+
 	it('claims suspension only when no live command lease exists', async () => {
 		entityManager.update.mockResolvedValue({ affected: 0, generatedMaps: [], raw: [] });
 		const claimedAt = new Date('2026-11-11T12:00:00.000Z');
@@ -67,7 +99,7 @@ describe('SubstrateActorActivityRepository', () => {
 		);
 	});
 
-	it('records command exit and clears the final lease', async () => {
+	it('returns a suspension candidate when the final running command exits', async () => {
 		entityManager.findOneBy.mockResolvedValueOnce({
 			...activity,
 			activeCommandCount: 1,
@@ -75,7 +107,11 @@ describe('SubstrateActorActivityRepository', () => {
 		});
 		entityManager.update.mockResolvedValueOnce({ affected: 1, generatedMaps: [], raw: [] });
 
-		await repository.recordCommandFinished(activity.actorId, activityAt);
+		await expect(repository.recordCommandFinished(activity.actorId, activityAt)).resolves.toEqual({
+			actorId: activity.actorId,
+			activityAt,
+			action: 'suspend',
+		});
 
 		expect(entityManager.update.mock.calls[0]?.[2]).toMatchObject({
 			lastActivityAt: activityAt,
@@ -83,5 +119,94 @@ describe('SubstrateActorActivityRepository', () => {
 			activeCommandCount: 0,
 			activeCommandLeaseUntil: null,
 		});
+	});
+
+	it('retries a command finish claim against newer activity', async () => {
+		const claimedAt = new Date('2026-11-11T12:00:05.000Z');
+		const newerActivityAt = new Date('2026-11-11T12:00:03.000Z');
+		entityManager.findOneBy
+			.mockResolvedValueOnce(activity)
+			.mockResolvedValueOnce({ ...activity, lastActivityAt: newerActivityAt });
+		entityManager.update
+			.mockResolvedValueOnce({ affected: 0, generatedMaps: [], raw: [] })
+			.mockResolvedValueOnce({ affected: 1, generatedMaps: [], raw: [] });
+
+		await expect(
+			repository.claimCommandFinishedActor(activity.actorId, claimedAt),
+		).resolves.toEqual({
+			actorId: activity.actorId,
+			activityAt: newerActivityAt,
+			claimedAt,
+			action: 'suspend',
+		});
+	});
+
+	it('does not claim a command finish while another command is active', async () => {
+		entityManager.findOneBy.mockResolvedValueOnce({
+			...activity,
+			activeCommandCount: 1,
+			activeCommandLeaseUntil: new Date(activityAt.getTime() + 660_000),
+		});
+
+		await expect(
+			repository.claimCommandFinishedActor(activity.actorId, activityAt),
+		).resolves.toBeUndefined();
+		expect(entityManager.update).not.toHaveBeenCalled();
+	});
+
+	it('does not claim a command finish while its command lease is still live', async () => {
+		entityManager.findOneBy.mockResolvedValueOnce({
+			...activity,
+			activeCommandLeaseUntil: new Date(activityAt.getTime() + 60_000),
+		});
+
+		await expect(
+			repository.claimCommandFinishedActor(activity.actorId, activityAt),
+		).resolves.toBeUndefined();
+		expect(entityManager.update).not.toHaveBeenCalled();
+	});
+
+	it('does not claim a command finish when the Actor is already suspended', async () => {
+		entityManager.findOneBy.mockResolvedValueOnce({
+			...activity,
+			lastSuspendedAt: activityAt,
+		});
+
+		await expect(
+			repository.claimCommandFinishedActor(activity.actorId, activityAt),
+		).resolves.toBeUndefined();
+		expect(entityManager.update).not.toHaveBeenCalled();
+	});
+
+	it('returns a delete claim for an ephemeral Actor', async () => {
+		entityManager.findOneBy.mockResolvedValueOnce({ ...activity, ephemeral: true });
+		entityManager.update.mockResolvedValueOnce({ affected: 1, generatedMaps: [], raw: [] });
+
+		await expect(
+			repository.claimCommandFinishedActor(activity.actorId, activityAt),
+		).resolves.toEqual({
+			actorId: activity.actorId,
+			activityAt: activity.lastActivityAt,
+			claimedAt: activityAt,
+			action: 'delete',
+		});
+	});
+
+	it('keeps the remaining command lease when another command finishes', async () => {
+		entityManager.findOneBy.mockResolvedValueOnce({
+			...activity,
+			activeCommandCount: 2,
+			activeCommandLeaseUntil: new Date(activityAt.getTime() + 660_000),
+		});
+		entityManager.update.mockResolvedValueOnce({ affected: 1, generatedMaps: [], raw: [] });
+
+		await expect(
+			repository.recordCommandFinished(activity.actorId, activityAt),
+		).resolves.toBeUndefined();
+		const update = entityManager.update.mock.calls[0]?.[2];
+		expect(update).toMatchObject({
+			activeCommandCount: 1,
+		});
+		expect(update).not.toHaveProperty('suspensionClaimedAt');
 	});
 });

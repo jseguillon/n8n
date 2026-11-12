@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { createSandbox } from '@n8n/agents/sandbox';
 import type { WorkspaceSandbox } from '@n8n/agents/sandbox';
 import type { Logger } from '@n8n/backend-common';
+import type { GlobalConfig } from '@n8n/config';
 import type { SubstrateActorActivity } from '@n8n/db';
 import type { SubstrateSandboxConfig } from '@n8n/agents/sandbox';
 import { mock } from 'vitest-mock-extended';
@@ -66,6 +67,7 @@ describe('SubstrateActorLifecycleService', () => {
 	const activityRepository = mock<SubstrateActorActivityRepository>();
 	const sandboxSettingsService = mock<SandboxSettingsService>();
 	const logger = mock<Logger>();
+	const globalConfig = mock<GlobalConfig>();
 	let service: SubstrateActorLifecycleService;
 
 	beforeEach(() => {
@@ -76,6 +78,8 @@ describe('SubstrateActorLifecycleService', () => {
 		activityRepository.markSuspended.mockResolvedValue(true);
 		activityRepository.releaseExpiredSuspensionClaims.mockResolvedValue();
 		activityRepository.releaseSuspensionClaim.mockResolvedValue();
+		activityRepository.claimCommandFinishedActor.mockResolvedValue(undefined);
+		globalConfig.generic.substrateSandboxSuspendDelayMs = 0;
 		sandboxSettingsService.getProvider.mockReturnValue('substrate');
 		sandboxSettingsService.getSubstrateConfig.mockResolvedValue({
 			enabled: true,
@@ -86,6 +90,7 @@ describe('SubstrateActorLifecycleService', () => {
 			activityRepository,
 			sandboxSettingsService,
 			logger,
+			globalConfig,
 		);
 	});
 
@@ -177,7 +182,205 @@ describe('SubstrateActorLifecycleService', () => {
 
 		expect(activityRepository.recordCommandStarted).toHaveBeenCalledWith('n8n-actor-1', 600_000);
 		expect(activityRepository.recordCommandHeartbeat).toHaveBeenCalledWith('n8n-actor-1', 600_000);
-		expect(activityRepository.recordCommandFinished).toHaveBeenCalledWith('n8n-actor-1');
+		expect(activityRepository.recordCommandFinished).toHaveBeenCalledWith(
+			'n8n-actor-1',
+			expect.any(Date),
+		);
+		expect(createSandbox).not.toHaveBeenCalled();
+	});
+
+	it('waits for the configured command grace period before trying to suspend', async () => {
+		globalConfig.generic.substrateSandboxSuspendDelayMs = 40;
+		activityRepository.recordCommandFinished.mockResolvedValue({
+			actorId: 'n8n-actor-1',
+			activityAt: new Date(),
+			action: 'suspend',
+		});
+		activityRepository.claimCommandFinishedActor.mockResolvedValue(undefined);
+		const recorder = service.createCommandActivityRecorder(connection, {
+			autoStopMinutes: 5,
+			autoDeleteMinutes: 1_440,
+			ephemeral: false,
+		});
+
+		await recorder('n8n-actor-1', 'finished', 600_000);
+		expect(activityRepository.recordCommandFinished).not.toHaveBeenCalled();
+		expect(activityRepository.claimCommandFinishedActor).not.toHaveBeenCalled();
+
+		await new Promise((resolve) => setTimeout(resolve, 60));
+
+		const finishedAt = activityRepository.recordCommandFinished.mock.calls[0]?.[1];
+		expect(finishedAt).toBeInstanceOf(Date);
+		expect(activityRepository.claimCommandFinishedActor).toHaveBeenCalledWith(
+			'n8n-actor-1',
+			expect.any(Date),
+		);
+		expect(createSandbox).not.toHaveBeenCalled();
+	});
+
+	it('does not suspend while a follow-up command is active during the grace period', async () => {
+		globalConfig.generic.substrateSandboxSuspendDelayMs = 40;
+		activityRepository.recordCommandStarted.mockResolvedValue(true);
+		activityRepository.recordCommandFinished.mockResolvedValue(undefined);
+		const recorder = service.createCommandActivityRecorder(connection, {
+			autoStopMinutes: 5,
+			autoDeleteMinutes: 1_440,
+			ephemeral: false,
+		});
+
+		await recorder('n8n-actor-1', 'finished', 600_000);
+		await recorder('n8n-actor-1', 'started', 600_000);
+		await new Promise((resolve) => setTimeout(resolve, 60));
+
+		expect(activityRepository.recordCommandFinished).toHaveBeenCalledOnce();
+		expect(activityRepository.claimCommandFinishedActor).not.toHaveBeenCalled();
+		expect(createSandbox).not.toHaveBeenCalled();
+	});
+
+	it('does not apply the grace period when automatic suspension is disabled', async () => {
+		globalConfig.generic.substrateSandboxSuspendDelayMs = 40;
+		const recorder = service.createCommandActivityRecorder(connection, {
+			autoStopMinutes: 0,
+			autoDeleteMinutes: 1_440,
+			ephemeral: false,
+		});
+
+		await recorder('n8n-actor-1', 'finished', 600_000);
+
+		expect(activityRepository.recordCommandFinished).toHaveBeenCalledWith(
+			'n8n-actor-1',
+			expect.any(Date),
+		);
+		expect(activityRepository.claimCommandFinishedActor).not.toHaveBeenCalled();
+	});
+
+	it('does not delay command completion while suspending the persistent Actor', async () => {
+		const finishedAt = new Date('2026-11-10T12:00:00.000Z');
+		activityRepository.recordCommandFinished.mockResolvedValue({
+			actorId: 'n8n-actor-1',
+			activityAt: finishedAt,
+			action: 'suspend',
+		});
+		activityRepository.claimCommandFinishedActor.mockResolvedValue({
+			actorId: 'n8n-actor-1',
+			activityAt: finishedAt,
+			claimedAt: finishedAt,
+			action: 'suspend',
+		});
+		activityRepository.markSuspended.mockResolvedValue(true);
+		const sandbox = mock<TestWorkspaceSandbox>();
+		let finishStop!: () => void;
+		const stopFinished = new Promise<void>((resolve) => {
+			finishStop = resolve;
+		});
+		sandbox.stop.mockReturnValue(stopFinished);
+		vi.mocked(createSandbox).mockResolvedValue(sandbox);
+		const recorder = service.createCommandActivityRecorder(connection, {
+			autoStopMinutes: 5,
+			autoDeleteMinutes: 1_440,
+			ephemeral: false,
+		});
+
+		await recorder('n8n-actor-1', 'finished', 600_000);
+		await vi.waitFor(() => expect(sandbox.stop).toHaveBeenCalledOnce());
+		expect(activityRepository.markSuspended).not.toHaveBeenCalled();
+		finishStop();
+		await vi.waitFor(() => expect(activityRepository.markSuspended).toHaveBeenCalledOnce());
+
+		expect(createSandbox).toHaveBeenCalledWith(
+			expect.objectContaining({
+				enabled: true,
+				provider: 'substrate',
+				id: 'actor-1',
+				onActivity: undefined,
+				onCommandActivity: undefined,
+			}),
+		);
+		expect(sandbox.stop).toHaveBeenCalledOnce();
+		expect(activityRepository.markSuspended).toHaveBeenCalledWith(
+			'n8n-actor-1',
+			finishedAt,
+			expect.any(Date),
+			expect.any(Date),
+			true,
+		);
+		expect(sandbox.stop.mock.invocationCallOrder[0]).toBeLessThan(
+			activityRepository.markSuspended.mock.invocationCallOrder[0],
+		);
+	});
+
+	it('deletes an ephemeral Actor after the delayed command completion claim', async () => {
+		const finishedAt = new Date('2026-11-10T12:00:00.000Z');
+		const claimedAt = new Date('2026-11-10T12:00:05.000Z');
+		globalConfig.generic.substrateSandboxSuspendDelayMs = 40;
+		activityRepository.recordCommandFinished.mockResolvedValue({
+			actorId: 'n8n-actor-1',
+			activityAt: finishedAt,
+			action: 'delete',
+		});
+		activityRepository.claimCommandFinishedActor.mockResolvedValue({
+			actorId: 'n8n-actor-1',
+			activityAt: finishedAt,
+			claimedAt,
+			action: 'delete',
+		});
+		activityRepository.deleteIfUnchanged.mockResolvedValue(true);
+		const sandbox = mock<TestWorkspaceSandbox>();
+		sandbox.destroy.mockResolvedValue();
+		vi.mocked(createSandbox).mockResolvedValue(sandbox);
+		const recorder = service.createCommandActivityRecorder(connection, {
+			autoStopMinutes: 5,
+			autoDeleteMinutes: 0,
+			ephemeral: true,
+		});
+
+		await recorder('n8n-actor-1', 'finished', 600_000);
+		await vi.waitFor(() => expect(sandbox.destroy).toHaveBeenCalledOnce());
+
+		expect(sandbox.stop).not.toHaveBeenCalled();
+		expect(activityRepository.deleteIfUnchanged).toHaveBeenCalledWith(
+			'n8n-actor-1',
+			finishedAt,
+			claimedAt,
+		);
+	});
+
+	it('releases the claim when remote suspension fails', async () => {
+		const finishedAt = new Date('2026-11-10T12:00:00.000Z');
+		const claimedAt = new Date('2026-11-10T12:00:05.000Z');
+		activityRepository.recordCommandFinished.mockResolvedValue({
+			actorId: 'n8n-actor-1',
+			activityAt: finishedAt,
+			action: 'suspend',
+		});
+		activityRepository.claimCommandFinishedActor.mockResolvedValue({
+			actorId: 'n8n-actor-1',
+			activityAt: finishedAt,
+			claimedAt,
+			action: 'suspend',
+		});
+		const sandbox = mock<TestWorkspaceSandbox>();
+		sandbox.stop.mockRejectedValue(new Error('suspend failed'));
+		vi.mocked(createSandbox).mockResolvedValue(sandbox);
+		const recorder = service.createCommandActivityRecorder(connection, {
+			autoStopMinutes: 5,
+			autoDeleteMinutes: 1_440,
+			ephemeral: false,
+		});
+
+		await recorder('n8n-actor-1', 'finished', 600_000);
+		await vi.waitFor(() =>
+			expect(activityRepository.releaseSuspensionClaim).toHaveBeenCalledWith(
+				'n8n-actor-1',
+				claimedAt,
+			),
+		);
+		await vi.waitFor(() => expect(logger.warn).toHaveBeenCalledOnce());
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			'Failed to reclaim a Substrate Actor after its command finished',
+			expect.objectContaining({ actorId: 'n8n-actor-1' }),
+		);
 	});
 
 	it('deletes a suspended Actor after its retention interval', async () => {

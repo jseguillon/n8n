@@ -247,8 +247,10 @@ export class InstanceAiConfig {
 	evalInstance: boolean = false;
 
 	/**
-	 * Minutes an idle Daytona sandbox waits before it is stopped, or a persistent Substrate Actor
-	 * waits before it is suspended. Default 15 minutes. `0` disables auto-stop.
+	 * Minutes an idle Daytona sandbox waits before it stops. For Substrate, n8n suspends an Actor
+	 * after the configured command suspend delay, following its final command exit or timeout. n8n
+	 * uses this interval to recover if command-exit cleanup was missed. Set to 0 to disable automatic
+	 * suspension.
 	 */
 	@Env('N8N_INSTANCE_AI_SANDBOX_AUTO_STOP_MINUTES')
 	sandboxAutoStopMinutes: number = 15;

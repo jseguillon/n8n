@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { setTimeout as wait } from 'node:timers/promises';
 
 import { Logger } from '@n8n/backend-common';
-import { SubstrateActorActivityRepository } from '@n8n/db';
+import { GlobalConfig } from '@n8n/config';
+import { SubstrateActorActivityRepository, type SubstrateActorSuspensionClaim } from '@n8n/db';
 import { Service } from '@n8n/di';
 import { createSandbox } from '@n8n/agents/sandbox';
 import type { SubstrateCommandActivityPhase, SubstrateSandboxConfig } from '@n8n/agents/sandbox';
@@ -38,6 +39,7 @@ export class SubstrateActorLifecycleService {
 		private readonly activityRepository: SubstrateActorActivityRepository,
 		private readonly sandboxSettingsService: SandboxSettingsService,
 		private readonly logger: Logger,
+		private readonly globalConfig: GlobalConfig,
 	) {}
 
 	createActivityRecorder(
@@ -79,9 +81,143 @@ export class SubstrateActorLifecycleService {
 			if (phase === 'heartbeat') {
 				return await this.activityRepository.recordCommandHeartbeat(actorId, commandTimeoutMs);
 			}
-			await this.activityRepository.recordCommandFinished(actorId);
+			const finishedAt = new Date();
+			const delayMs =
+				policy.autoStopMinutes > 0 ? this.globalConfig.generic.substrateSandboxSuspendDelayMs : 0;
+			if (delayMs > 0) {
+				void this.finishCommandAfterDelay(connection, policy, actorId, finishedAt, delayMs);
+			} else {
+				await this.finishCommandAfterDelay(connection, policy, actorId, finishedAt, 0);
+			}
 			return true;
 		};
+	}
+
+	private async finishCommandAfterDelay(
+		connection: SubstrateSandboxConfig['connection'],
+		policy: SubstrateActorLifecyclePolicy,
+		actorId: string,
+		finishedAt: Date,
+		delayMs: number,
+	): Promise<void> {
+		try {
+			if (delayMs > 0) await wait(delayMs);
+			const completion = await this.activityRepository.recordCommandFinished(actorId, finishedAt);
+			if (!completion) return;
+
+			const claim = await this.activityRepository.claimCommandFinishedActor(
+				completion.actorId,
+				new Date(),
+			);
+			if (claim) void this.finishCommandLifecycle(connection, policy, claim);
+		} catch (error) {
+			this.logger.warn('Failed to finish Substrate Actor command cleanup', {
+				actorId,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+
+	private async finishCommandLifecycle(
+		connection: SubstrateSandboxConfig['connection'],
+		policy: SubstrateActorLifecyclePolicy,
+		completion: SubstrateActorSuspensionClaim,
+	): Promise<void> {
+		try {
+			const sandbox = await createSandbox({
+				enabled: true,
+				provider: 'substrate',
+				connection,
+				id: this.unprefixActorId(completion.actorId),
+				ephemeral: false,
+				onActivity: undefined,
+				onCommandActivity: undefined,
+			});
+			if (!sandbox) {
+				await this.activityRepository.releaseSuspensionClaim(
+					completion.actorId,
+					completion.claimedAt,
+				);
+				return;
+			}
+
+			const destroy = sandbox.destroy?.bind(sandbox);
+			if (completion.action === 'delete') {
+				if (!destroy) {
+					await this.activityRepository.releaseSuspensionClaim(
+						completion.actorId,
+						completion.claimedAt,
+					);
+					return;
+				}
+				await destroy();
+				const deleted = await this.activityRepository.deleteIfUnchanged(
+					completion.actorId,
+					completion.activityAt,
+					completion.claimedAt,
+				);
+				if (!deleted) {
+					await this.activityRepository.releaseSuspensionClaim(
+						completion.actorId,
+						completion.claimedAt,
+					);
+				}
+				return;
+			}
+
+			const stop = sandbox.stop?.bind(sandbox);
+			if (!stop) {
+				await this.activityRepository.releaseSuspensionClaim(
+					completion.actorId,
+					completion.claimedAt,
+				);
+				return;
+			}
+			await stop();
+			const markedSuspended = await this.activityRepository.markSuspended(
+				completion.actorId,
+				completion.activityAt,
+				completion.claimedAt,
+				new Date(),
+				policy.autoDeleteMinutes !== 0,
+			);
+			if (!markedSuspended) {
+				await this.activityRepository.releaseSuspensionClaim(
+					completion.actorId,
+					completion.claimedAt,
+				);
+				return;
+			}
+			if (policy.autoDeleteMinutes === 0) {
+				if (!destroy) {
+					await this.activityRepository.releaseSuspensionClaim(
+						completion.actorId,
+						completion.claimedAt,
+					);
+					return;
+				}
+				await destroy();
+				const deleted = await this.activityRepository.deleteIfUnchanged(
+					completion.actorId,
+					completion.activityAt,
+					completion.claimedAt,
+				);
+				if (!deleted) {
+					await this.activityRepository.releaseSuspensionClaim(
+						completion.actorId,
+						completion.claimedAt,
+					);
+				}
+			}
+		} catch (error) {
+			await this.activityRepository
+				.releaseSuspensionClaim(completion.actorId, completion.claimedAt)
+				.catch(() => undefined);
+			this.logger.warn('Failed to reclaim a Substrate Actor after its command finished', {
+				actorId: completion.actorId,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
 	}
 
 	async forgetActor(actorId: string): Promise<void> {

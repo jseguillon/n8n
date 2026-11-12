@@ -77,11 +77,15 @@ Daytona lifecycle values control auto-stop, auto-archive, and auto-delete.
 it stops, which supersedes the auto-delete interval. For Substrate, it deletes
 the Actor when the in-process thread cache expires.
 
-Substrate uses the same auto-stop and auto-delete values for persistent Actors.
-The cleanup task suspends an Actor after the idle interval and deletes it after
-the stopped interval. A cluster leader runs the task once per minute. The task
-stores Actor activity in the n8n database so it survives restarts and works
-across main processes. Auto-archive applies only to Daytona.
+When auto-stop is enabled, Substrate waits for the configured command suspend
+delay after its final command exits or times out. The delay defaults to 5 seconds.
+A new command during this interval cancels the pending suspension. n8n then
+suspends the Actor, snapshots its state, and releases its worker. An hourly
+cluster-leader task is the recovery path for command-exit cleanup missed during an
+n8n restart. It suspends Actors after their configured auto-stop interval and
+deletes suspended Actors after their auto-delete interval. It stores Actor
+activity in the n8n database so it works across main processes. Auto-archive
+applies only to Daytona.
 
 ## Thread-Scoped Lifecycle
 
@@ -316,7 +320,8 @@ roots. If n8n cannot create the link, the tools use `/home/daytona/workspace`.
 | `N8N_INSTANCE_AI_BUILDER_SANDBOX_TTL_MS`        | `900000`                  | In-process idle cache TTL; `0` disables eviction                              |
 | `N8N_INSTANCE_AI_SANDBOX_NAME_PREFIX`           | empty                     | Prefix and label for Daytona names                                            |
 | `N8N_INSTANCE_AI_SANDBOX_EPHEMERAL`             | `false`                   | Delete the sandbox once idle instead of stopping it                           |
-| `N8N_INSTANCE_AI_SANDBOX_AUTO_STOP_MINUTES`     | `15`                      | Daytona idle time before stop or Substrate idle time before suspend; `0` disables auto-stop |
+| `N8N_INSTANCE_AI_SANDBOX_AUTO_STOP_MINUTES`     | `15`                      | Daytona idle time before stop; Substrate Actor suspend after command exit or timeout and hourly recovery threshold; `0` disables automatic suspension |
+| `N8N_SUBSTRATE_SANDBOX_SUSPEND_DELAY_MS`        | `5000`                    | Milliseconds to wait after the final command before suspend; a new command cancels the pending suspend; `0` suspends immediately |
 | `N8N_INSTANCE_AI_SANDBOX_AUTO_ARCHIVE_MINUTES`  | `60`                      | Daytona stopped time before archive; `0` uses its maximum                     |
 | `N8N_INSTANCE_AI_SANDBOX_AUTO_DELETE_MINUTES`   | `10080`                   | Daytona stopped or Substrate suspended time before delete; negative disables and `0` deletes on stop |
 | `N8N_INSTANCE_AI_DAYTONA_TOKEN_REFRESH_SKEW_MS` | `300000`                  | Proxy-token refresh skew                                                      |
