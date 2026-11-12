@@ -370,6 +370,14 @@ export class AgentSandboxRuntimeService {
 				autoDeleteMinutes: lifecycle.autoDeleteInterval ?? -1,
 				ephemeral: lifecycle.ephemeral ?? false,
 			}),
+			onCommandActivity: this.substrateActorLifecycle.createCommandActivityRecorder(
+				config.connection,
+				{
+					autoStopMinutes: lifecycle.autoStopInterval ?? 0,
+					autoDeleteMinutes: lifecycle.autoDeleteInterval ?? -1,
+					ephemeral: lifecycle.ephemeral ?? false,
+				},
+			),
 			onDestroyed: async (actorId) => await this.substrateActorLifecycle.forgetActor(actorId),
 		};
 	}

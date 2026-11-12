@@ -19,6 +19,15 @@ export class SubstrateActorActivity extends WithTimestamps {
 	@DateTimeColumn({ nullable: true })
 	lastSuspendedAt: Date | null;
 
+	@DateTimeColumn({ nullable: true })
+	suspensionClaimedAt: Date | null;
+
+	@Column({ type: 'int', default: 0 })
+	activeCommandCount: number;
+
+	@DateTimeColumn({ nullable: true })
+	activeCommandLeaseUntil: Date | null;
+
 	@Column({ type: activityIntervalColumnType })
 	autoStopMinutes: number;
 

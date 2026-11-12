@@ -116,6 +116,48 @@ describe('Substrate sandbox daemon protocol', () => {
 		expect(onActivity).toHaveBeenNthCalledWith(2, 'n8n-test-actor');
 	});
 
+	it('keeps command activity open until the execution stream exits', async () => {
+		vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
+		const encoder = new TextEncoder();
+		let finishExecution!: () => void;
+		const executionFinished = new Promise<void>((resolve) => {
+			finishExecution = resolve;
+		});
+		const executionStream = new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(encoder.encode('{"type":"started","exec_id":"exec-1"}\n'));
+				void executionFinished.then(() => {
+					controller.enqueue(
+						encoder.encode(
+							'{"type":"exit","exit_code":0,"success":true,"execution_time_ms":10,"timed_out":false,"killed":false}\n',
+						),
+					);
+					controller.close();
+				});
+			},
+		});
+		const fetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response('ok'))
+			.mockResolvedValueOnce(new Response(executionStream));
+		vi.stubGlobal('fetch', fetch);
+		const onCommandActivity = vi.fn().mockResolvedValue(true);
+		onCommandActivity.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+		const sandbox = new SubstrateSandbox({ ...connection, onCommandActivity });
+
+		const execution = sandbox.executeCommand('sleep', ['600'], { timeout: 600_000 });
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+		const actorId = onCommandActivity.mock.calls[0]?.[0];
+		expect(actorId).toMatch(/^n8n-/);
+		expect(onCommandActivity).toHaveBeenNthCalledWith(1, actorId, 'started', 600_000, undefined);
+		expect(onCommandActivity).toHaveBeenNthCalledWith(2, actorId, 'started', 600_000, undefined);
+		expect(onCommandActivity.mock.calls.some(([, phase]) => phase === 'finished')).toBe(false);
+
+		finishExecution();
+		expect(await execution).toMatchObject({ success: true, exitCode: 0 });
+		expect(onCommandActivity).toHaveBeenLastCalledWith(actorId, 'finished', 600_000);
+	});
+
 	it('does not allow request headers to override the target Actor', async () => {
 		const fetch = vi.fn().mockResolvedValue(new Response('ok'));
 		vi.stubGlobal('fetch', fetch);
@@ -205,7 +247,7 @@ describe('Substrate sandbox daemon protocol', () => {
 		expect(fetch).not.toHaveBeenCalled();
 	});
 
-	it('reads split execution events and rejects incomplete streams', async () => {
+	it('reads split execution events and resumes incomplete streams', async () => {
 		vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
 		const encoder = new TextEncoder();
 		const stdout = vi.fn();
@@ -239,7 +281,19 @@ describe('Substrate sandbox daemon protocol', () => {
 					}),
 				),
 			)
-			.mockResolvedValueOnce(new Response('{"type":"stdout","data":"partial"}\n'));
+			.mockImplementationOnce(async (_url, init) => {
+				const postBody = JSON.parse(String(init?.body)) as { exec_id: string };
+				return new Response(
+					`{"seq":0,"type":"started","exec_id":"${postBody.exec_id}"}\n` +
+						'{"seq":1,"type":"stdout","data":"par',
+				);
+			})
+			.mockResolvedValueOnce(
+				new Response(
+					'{"seq":1,"type":"stdout","data":"partial"}\n' +
+						'{"seq":2,"type":"exit","exit_code":0,"success":true,"execution_time_ms":1,"timed_out":false,"killed":false}\n',
+				),
+			);
 		vi.stubGlobal('fetch', fetch);
 		const sandbox = new SubstrateSandbox(connection);
 		expect(
@@ -247,9 +301,14 @@ describe('Substrate sandbox daemon protocol', () => {
 		).toMatchObject({ stdout: 'ok', stderr: 'warning', exitCode: 0 });
 		expect(stdout).toHaveBeenCalledWith('ok');
 		expect(stderr).toHaveBeenCalledWith('warning');
-		await expect(sandbox.executeCommand('printf', ['partial'])).rejects.toThrow(
-			'without an exit event',
-		);
+		await expect(sandbox.executeCommand('printf', ['partial'])).resolves.toMatchObject({
+			success: true,
+			stdout: 'partial',
+			exitCode: 0,
+		});
+		const postBody = JSON.parse(String(fetch.mock.calls[2][1]?.body)) as { exec_id: string };
+		expect(fetch.mock.calls[3][0].pathname).toBe(`/executions/${postBody.exec_id}`);
+		expect(fetch.mock.calls[3][0].searchParams.get('after')).toBe('0');
 	});
 
 	it('rejects malformed execution events after cancelling a started execution', async () => {
@@ -284,35 +343,46 @@ describe('Substrate sandbox daemon protocol', () => {
 		);
 	});
 
-	it('cancels a started execution when its stream fails', async () => {
+	it('resumes a started execution when its event stream disconnects', async () => {
 		vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
 		const encoder = new TextEncoder();
 		let started = false;
+		let execId = '';
 		const fetch = vi
 			.fn()
 			.mockResolvedValueOnce(new Response('ok'))
-			.mockResolvedValueOnce(
-				new Response(
+			.mockImplementationOnce(async (_url, init) => {
+				execId = (JSON.parse(String(init?.body)) as { exec_id: string }).exec_id;
+				return new Response(
 					new ReadableStream({
 						pull(controller) {
 							if (!started) {
 								started = true;
-								controller.enqueue(encoder.encode('{"type":"started","exec_id":"exec-1"}\n'));
+								controller.enqueue(
+									encoder.encode(`{"seq":0,"type":"started","exec_id":"${execId}"}\n`),
+								);
 								return;
 							}
-							controller.error(new Error('stream failed'));
+							controller.error(new TypeError('terminated'));
 						},
 					}),
+				);
+			})
+			.mockResolvedValueOnce(
+				new Response(
+					'{"seq":1,"type":"exit","exit_code":0,"success":true,"execution_time_ms":10,"timed_out":false,"killed":false}\n',
 				),
-			)
-			.mockResolvedValueOnce(new Response('ok'));
+			);
 		vi.stubGlobal('fetch', fetch);
 		const sandbox = new SubstrateSandbox(connection);
 
-		await expect(sandbox.executeCommand('sleep', ['10'])).rejects.toThrow('stream failed');
+		expect(await sandbox.executeCommand('sleep', ['600'])).toMatchObject({
+			success: true,
+			exitCode: 0,
+		});
 
-		expect(fetch.mock.calls[2][0].pathname).toBe('/executions/exec-1');
-		expect(fetch.mock.calls[2][1]).toMatchObject({ method: 'DELETE' });
+		expect(fetch.mock.calls[2][0].pathname).toBe(`/executions/${execId}`);
+		expect(fetch.mock.calls[2][0].searchParams.get('after')).toBe('0');
 	});
 
 	it('reports daemon execution errors and cancels the execution', async () => {

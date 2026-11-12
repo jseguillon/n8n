@@ -8,13 +8,15 @@ import type {
 	MoveFileRequest,
 } from '@n8n/sandbox-client';
 import { createHash, randomUUID } from 'node:crypto';
+import { setTimeout as wait } from 'node:timers/promises';
+// eslint-disable-next-line n8n-local-rules/no-uncentralized-http -- The Substrate router requires mTLS, which backend-network does not expose.
 import { Agent } from 'undici';
 import { z } from 'zod';
 
 import { BaseSandbox } from './base-sandbox';
 import { toShellCommand } from './shell-command';
 import { SubstrateControl, type SubstrateConnection } from './substrate-control';
-import type { SandboxFileClient } from './types';
+import type { SandboxFileClient, SubstrateCommandActivityPhase } from './types';
 import type { CommandResult, ExecuteCommandOptions } from '../types';
 
 const fileStat = z
@@ -42,11 +44,22 @@ const fileEntry = z
 	.transform(({ is_dir, mod_time, ...entry }) => ({ ...entry, isDir: is_dir, modTime: mod_time }));
 const MAX_EXECUTION_EVENT_BYTES = 1024 * 1024;
 const MAX_EXECUTION_OUTPUT_BYTES = 10 * 1024 * 1024;
+const MAX_EXECUTION_RESUME_RETRIES = 10;
+const EXECUTION_RESUME_DELAY_MS = 250;
+const TRANSIENT_EXECUTION_ERROR_CODES = new Set([
+	'ECONNRESET',
+	'ECONNREFUSED',
+	'EPIPE',
+	'ETIMEDOUT',
+	'ECONNABORTED',
+	'ERR_STREAM_PREMATURE_CLOSE',
+]);
+const eventSequence = z.number().int().nonnegative().optional();
 const eventSchema = z.discriminatedUnion('type', [
-	z.object({ type: z.literal('started'), exec_id: z.string() }),
-	z.object({ type: z.literal('stdout'), data: z.string() }),
-	z.object({ type: z.literal('stderr'), data: z.string() }),
-	z.object({ type: z.literal('error'), error: z.string() }),
+	z.object({ type: z.literal('started'), exec_id: z.string(), seq: eventSequence }),
+	z.object({ type: z.literal('stdout'), data: z.string(), seq: eventSequence }),
+	z.object({ type: z.literal('stderr'), data: z.string(), seq: eventSequence }),
+	z.object({ type: z.literal('error'), error: z.string(), seq: eventSequence }),
 	z.object({
 		type: z.literal('exit'),
 		exit_code: z.number(),
@@ -54,14 +67,36 @@ const eventSchema = z.discriminatedUnion('type', [
 		execution_time_ms: z.number(),
 		timed_out: z.boolean(),
 		killed: z.boolean(),
+		seq: eventSequence,
 	}),
 ]);
+
+function isTransientExecutionRequestError(error: unknown): boolean {
+	if (error instanceof SandboxServiceError) {
+		return error.status === 0 || error.status === 429 || error.status === 503;
+	}
+	if (!(error instanceof Error)) return false;
+	if (
+		error.name === 'TypeError' &&
+		(error.message === 'terminated' || error.message === 'fetch failed')
+	)
+		return true;
+	return 'code' in error && typeof error.code === 'string'
+		? TRANSIENT_EXECUTION_ERROR_CODES.has(error.code)
+		: false;
+}
 
 export interface SubstrateSandboxOptions extends SubstrateConnection {
 	id?: string;
 	timeout?: number;
 	ephemeral?: boolean;
-	onActivity?: (actorId: string) => Promise<void>;
+	onActivity?: (actorId: string, abortSignal?: AbortSignal) => Promise<void>;
+	onCommandActivity?: (
+		actorId: string,
+		phase: SubstrateCommandActivityPhase,
+		commandTimeoutMs: number,
+		abortSignal?: AbortSignal,
+	) => Promise<boolean>;
 	onDestroyed?: (actorId: string) => Promise<void>;
 }
 
@@ -147,7 +182,7 @@ export class SubstrateSandbox extends BaseSandbox {
 		url.search = new URLSearchParams(query).toString();
 		const headers = new Headers(init.headers);
 		headers.set('ate-target-actor', `${this.options.atespace}/${this.id}`);
-		await this.options.onActivity?.(this.id);
+		await this.recordActivity(init.signal);
 		const dispatcher = await this.getRouterAgent(url);
 		let response: Response;
 		try {
@@ -161,7 +196,7 @@ export class SubstrateSandbox extends BaseSandbox {
 				dispatcher,
 			});
 		} finally {
-			await this.options.onActivity?.(this.id);
+			await this.recordActivity();
 		}
 		if (!response.ok) {
 			await response.body?.cancel();
@@ -224,17 +259,55 @@ export class SubstrateSandbox extends BaseSandbox {
 		args: string[] = [],
 		options?: ExecuteCommandOptions,
 	): Promise<CommandResult> {
-		const heartbeat = setInterval(() => {
-			if (this.options.onActivity) {
-				void this.options.onActivity(this.id).catch(() => undefined);
+		const timeout = options?.timeout ?? this.timeout;
+		await this.recordActivity(options?.abortSignal);
+		if (this.options.onCommandActivity) {
+			let started = await this.options.onCommandActivity(
+				this.id,
+				'started',
+				timeout,
+				options?.abortSignal,
+			);
+			while (!started) {
+				options?.abortSignal?.throwIfAborted();
+				await wait(
+					100,
+					undefined,
+					options?.abortSignal ? { signal: options.abortSignal } : undefined,
+				);
+				started = await this.options.onCommandActivity(
+					this.id,
+					'started',
+					timeout,
+					options?.abortSignal,
+				);
 			}
-		}, 30_000);
+		}
+
+		const heartbeat = setInterval(() => {
+			if (this.options.onCommandActivity) {
+				void this.options.onCommandActivity(this.id, 'heartbeat', timeout).catch(() => undefined);
+			} else if (this.options.onActivity) {
+				void this.recordActivity().catch(() => undefined);
+			}
+		}, 15_000);
 		heartbeat.unref();
 		try {
 			return await this.executeCommandWithActivity(command, args, options);
 		} finally {
 			clearInterval(heartbeat);
+			if (this.options.onCommandActivity) {
+				await this.options.onCommandActivity(this.id, 'finished', timeout).catch(() => undefined);
+			} else {
+				await this.recordActivity().catch(() => undefined);
+			}
 		}
+	}
+
+	private async recordActivity(abortSignal?: AbortSignal | null): Promise<void> {
+		if (!this.options.onActivity) return;
+		if (abortSignal) await this.options.onActivity(this.id, abortSignal);
+		else await this.options.onActivity(this.id);
 	}
 
 	private async executeCommandWithActivity(
@@ -246,29 +319,19 @@ export class SubstrateSandbox extends BaseSandbox {
 		const timeout = options?.timeout ?? this.timeout;
 		const signals = [AbortSignal.timeout(timeout + 30_000)];
 		if (options?.abortSignal) signals.push(options.abortSignal);
-		let execId: string | undefined;
+		const signal = AbortSignal.any(signals);
+		let execId: string = randomUUID();
+		let lastSeq = -1;
 		let stdout = '';
 		let stderr = '';
 		let outputBytes = 0;
 		let result: CommandResult | undefined;
+		let executionError: string | undefined;
 		try {
-			const response = await this.request('/executions', {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({
-					command: toShellCommand(command, args),
-					env: options?.env,
-					workdir: options?.cwd,
-					timeout_ms: timeout,
-				}),
-				signal: AbortSignal.any(signals),
-			});
-			if (!response.body) throw new Error('Substrate returned no execution stream');
-			const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-			let pending = '';
 			const consume = (line: string) => {
 				if (!line.trim()) return;
 				const event = eventSchema.parse(JSON.parse(line));
+				if (event.seq !== undefined) lastSeq = event.seq;
 				switch (event.type) {
 					case 'started':
 						execId = event.exec_id;
@@ -288,7 +351,8 @@ export class SubstrateSandbox extends BaseSandbox {
 						options?.onStderr?.(event.data);
 						break;
 					case 'error':
-						throw new Error(event.error);
+						executionError = event.error;
+						break;
 					case 'exit':
 						result = {
 							command,
@@ -304,26 +368,110 @@ export class SubstrateSandbox extends BaseSandbox {
 						break;
 				}
 			};
-			try {
-				for (;;) {
-					const chunk = await reader.read();
-					if (chunk.done) break;
-					pending += chunk.value;
-					let newline: number;
-					while ((newline = pending.indexOf('\n')) >= 0) {
-						const line = pending.slice(0, newline);
-						if (Buffer.byteLength(line) > MAX_EXECUTION_EVENT_BYTES)
+			const consumeStream = async (response: Response): Promise<boolean> => {
+				if (!response.body) throw new Error('Substrate returned no execution stream');
+				const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+				let pending = '';
+				try {
+					for (;;) {
+						let chunk: ReadableStreamReadResult<string>;
+						try {
+							chunk = await reader.read();
+						} catch (error) {
+							if (signal.aborted) throw error;
+							return false;
+						}
+						if (chunk.done) break;
+						pending += chunk.value;
+						let newline: number;
+						while ((newline = pending.indexOf('\n')) >= 0) {
+							const line = pending.slice(0, newline);
+							if (Buffer.byteLength(line) > MAX_EXECUTION_EVENT_BYTES)
+								throw new Error('Substrate execution event exceeded the 1 MiB limit');
+							consume(line);
+							pending = pending.slice(newline + 1);
+							if (result || executionError) return true;
+						}
+						if (Buffer.byteLength(pending) > MAX_EXECUTION_EVENT_BYTES)
 							throw new Error('Substrate execution event exceeded the 1 MiB limit');
-						consume(line);
-						pending = pending.slice(newline + 1);
 					}
-					if (Buffer.byteLength(pending) > MAX_EXECUTION_EVENT_BYTES)
-						throw new Error('Substrate execution event exceeded the 1 MiB limit');
+					if (pending.trim()) {
+						try {
+							consume(pending);
+						} catch (error) {
+							if (error instanceof SyntaxError || error instanceof z.ZodError) return false;
+							throw error;
+						}
+					}
+					return result !== undefined || executionError !== undefined;
+				} finally {
+					await reader.cancel().catch(() => {});
 				}
-				consume(pending);
-			} finally {
-				await reader.cancel().catch(() => {});
+			};
+
+			const postBody = JSON.stringify({
+				command: toShellCommand(command, args),
+				env: options?.env,
+				workdir: options?.cwd,
+				timeout_ms: timeout,
+				exec_id: execId,
+			});
+			let response: Response | undefined;
+			for (let attempt = 0; attempt <= MAX_EXECUTION_RESUME_RETRIES; attempt++) {
+				try {
+					response = await this.request('/executions', {
+						method: 'POST',
+						headers: { 'content-type': 'application/json' },
+						body: postBody,
+						signal,
+					});
+					execId = response.headers.get('x-exec-id') ?? execId;
+					break;
+				} catch (error) {
+					if (
+						signal.aborted ||
+						!isTransientExecutionRequestError(error) ||
+						attempt === MAX_EXECUTION_RESUME_RETRIES
+					) {
+						throw error;
+					}
+					await wait(EXECUTION_RESUME_DELAY_MS, undefined, { signal });
+				}
 			}
+
+			if (!response) throw new Error('Substrate execution did not return a response');
+			let resumeAttempts = 0;
+			while (!result && !executionError) {
+				if (await consumeStream(response)) break;
+				if (resumeAttempts >= MAX_EXECUTION_RESUME_RETRIES) {
+					throw new Error('Substrate execution stream ended without an exit event');
+				}
+				resumeAttempts++;
+				await wait(EXECUTION_RESUME_DELAY_MS, undefined, { signal });
+				const query: Record<string, string> = { follow: 'true' };
+				if (lastSeq >= 0) query.after = String(lastSeq);
+				for (let attempt = 0; attempt <= MAX_EXECUTION_RESUME_RETRIES; attempt++) {
+					try {
+						response = await this.request(
+							`/executions/${encodeURIComponent(execId)}`,
+							{ signal },
+							query,
+						);
+						break;
+					} catch (error) {
+						if (
+							signal.aborted ||
+							!isTransientExecutionRequestError(error) ||
+							attempt === MAX_EXECUTION_RESUME_RETRIES
+						) {
+							throw error;
+						}
+						await wait(EXECUTION_RESUME_DELAY_MS, undefined, { signal });
+					}
+				}
+			}
+
+			if (executionError) throw new Error(executionError);
 			if (!result) throw new Error('Substrate execution ended without an exit event');
 			return result;
 		} catch (error) {

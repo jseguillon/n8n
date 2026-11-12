@@ -70,6 +70,10 @@ Assistant workspaces use a thread-derived identity.
 n8n records Substrate Actor activity in its database. A cluster-leader task
 suspends idle persistent Actors and deletes them after their stopped retention
 interval. It runs once per minute and covers Instance AI and Agent Actors.
+An in-flight workspace command holds an activity lease, so idle cleanup waits for
+the command to exit or reach its command timeout. The command timeout still
+applies independently of the idle timer. If the execution stream disconnects,
+n8n resumes it by execution ID instead of starting the command again.
 
 Instance AI uses `N8N_INSTANCE_AI_SANDBOX_AUTO_STOP_MINUTES` (default 15) and
 `N8N_INSTANCE_AI_SANDBOX_AUTO_DELETE_MINUTES` (default 10080). Agent workspaces

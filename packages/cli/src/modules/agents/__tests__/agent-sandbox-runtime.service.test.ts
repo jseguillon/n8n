@@ -97,6 +97,7 @@ function makeService({
 	sandboxSettingsService = makeSandboxSettingsService(),
 	substrateActorLifecycle = mock<SubstrateActorLifecycleService>({
 		createActivityRecorder: vi.fn(() => async () => {}),
+		createCommandActivityRecorder: vi.fn(() => async () => true),
 	}),
 }: {
 	configOverrides?: Partial<AgentsConfig>;
@@ -317,6 +318,7 @@ describe('AgentSandboxRuntimeService', () => {
 		const recordActivity = vi.fn(async () => {});
 		const substrateActorLifecycle = mock<SubstrateActorLifecycleService>({
 			createActivityRecorder: vi.fn(() => recordActivity),
+			createCommandActivityRecorder: vi.fn(() => async () => true),
 		});
 		const service = makeService({
 			sandboxSettingsService: makeSandboxSettingsService('substrate'),
@@ -327,12 +329,17 @@ describe('AgentSandboxRuntimeService', () => {
 		const config = createSandboxMock.mock.calls[0][0];
 		if (config.provider !== 'substrate') throw new Error('Expected Substrate config');
 		await config.onActivity?.('n8n-workspace-actor');
+		await config.onCommandActivity?.('n8n-workspace-actor', 'started', 300_000);
 
 		expect(substrateActorLifecycle.createActivityRecorder).toHaveBeenCalledWith(
 			expect.objectContaining({ atespace: 'n8n', template: 'sandbox' }),
 			{ autoStopMinutes: 5, autoDeleteMinutes: 24 * 60, ephemeral: false },
 		);
 		expect(recordActivity).toHaveBeenCalledWith('n8n-workspace-actor');
+		expect(substrateActorLifecycle.createCommandActivityRecorder).toHaveBeenCalledWith(
+			expect.objectContaining({ atespace: 'n8n', template: 'sandbox' }),
+			{ autoStopMinutes: 5, autoDeleteMinutes: 24 * 60, ephemeral: false },
+		);
 	});
 
 	it('marks the n8n sandbox knowledge sandbox ephemeral when configured, but never the workspace', async () => {
@@ -351,6 +358,7 @@ describe('AgentSandboxRuntimeService', () => {
 		const recordActivity = vi.fn(async () => {});
 		const substrateActorLifecycle = mock<SubstrateActorLifecycleService>({
 			createActivityRecorder: vi.fn(() => recordActivity),
+			createCommandActivityRecorder: vi.fn(() => async () => true),
 		});
 		const service = makeService({
 			configOverrides: { sandboxEphemeral: true },
@@ -366,6 +374,7 @@ describe('AgentSandboxRuntimeService', () => {
 			expect.objectContaining({
 				ephemeral: true,
 				onActivity: expect.any(Function),
+				onCommandActivity: expect.any(Function),
 			}),
 		);
 		expect(substrateActorLifecycle.createActivityRecorder).toHaveBeenCalledWith(

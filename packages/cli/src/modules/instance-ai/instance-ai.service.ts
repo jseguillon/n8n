@@ -577,11 +577,16 @@ export class InstanceAiService {
 			backgroundTasks: this.backgroundTasks,
 			settingsService: this.settingsService,
 			aiService: this.aiService,
-			onSubstrateActivity: async (actorId, connection, policy) =>
+			onSubstrateActivity: async (actorId, connection, policy, abortSignal) =>
 				await Container.get(SubstrateActorLifecycleService).createActivityRecorder(
 					connection,
 					policy,
-				)(actorId),
+				)(actorId, abortSignal),
+			onSubstrateCommandActivity: (connection, policy) =>
+				Container.get(SubstrateActorLifecycleService).createCommandActivityRecorder(
+					connection,
+					policy,
+				),
 			onSubstrateDestroyed: async (actorId) =>
 				await Container.get(SubstrateActorLifecycleService).forgetActor(actorId),
 			resolveTracingConfig: async (threadId, userId) => {

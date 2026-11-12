@@ -169,12 +169,14 @@ describe('createSandbox', () => {
 	});
 
 	it('returns a SubstrateSandbox for substrate provider', async () => {
+		const onCommandActivity = vi.fn(async () => true);
 		const config: SandboxConfig = {
 			enabled: true,
 			provider: 'substrate',
 			id: 'workspace-1',
 			timeout: 45_000,
 			ephemeral: true,
+			onCommandActivity,
 			connection: {
 				endpoint: '127.0.0.1:18443',
 				routerUrl: 'https://router.example.com',
@@ -191,6 +193,10 @@ describe('createSandbox', () => {
 		expect(result).toBeInstanceOf(SubstrateSandbox);
 		expect(result?.id).toBe('n8n-workspace-1');
 		expect(result?.provider).toBe('substrate');
+		expect(
+			(result as unknown as { options: { onCommandActivity?: typeof onCommandActivity } }).options
+				.onCommandActivity,
+		).toBe(onCommandActivity);
 	});
 
 	it('omits ephemeral from the N8nSandboxServiceSandbox when not configured', async () => {

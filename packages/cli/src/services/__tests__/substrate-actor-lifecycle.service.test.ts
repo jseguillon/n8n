@@ -49,6 +49,9 @@ function makeActivity(overrides: Partial<SubstrateActorActivity> = {}): Substrat
 		connectionFingerprint: fingerprint,
 		lastActivityAt: now,
 		lastSuspendedAt: null,
+		suspensionClaimedAt: null,
+		activeCommandCount: 0,
+		activeCommandLeaseUntil: null,
 		autoStopMinutes: 5,
 		autoDeleteMinutes: 1_440,
 		ephemeral: false,
@@ -68,6 +71,11 @@ describe('SubstrateActorLifecycleService', () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
 		activityRepository.findAll.mockResolvedValue([]);
+		activityRepository.recordActivity.mockResolvedValue(true);
+		activityRepository.claimIdleActor.mockResolvedValue(true);
+		activityRepository.markSuspended.mockResolvedValue(true);
+		activityRepository.releaseExpiredSuspensionClaims.mockResolvedValue();
+		activityRepository.releaseSuspensionClaim.mockResolvedValue();
 		sandboxSettingsService.getProvider.mockReturnValue('substrate');
 		sandboxSettingsService.getSubstrateConfig.mockResolvedValue({
 			enabled: true,
@@ -112,6 +120,13 @@ describe('SubstrateActorLifecycleService', () => {
 
 		await service.cleanupIdleActors(undefined, Date.parse('2026-11-10T12:00:00.000Z'));
 
+		expect(activityRepository.claimIdleActor).toHaveBeenCalledWith(
+			'n8n-actor-1',
+			activity.lastActivityAt,
+			null,
+			new Date('2026-11-10T12:00:00.000Z'),
+			new Date('2026-11-10T12:00:00.000Z'),
+		);
 		expect(createSandbox).toHaveBeenCalledWith(
 			expect.objectContaining({ id: 'actor-1', ephemeral: false }),
 		);
@@ -122,7 +137,47 @@ describe('SubstrateActorLifecycleService', () => {
 			'n8n-actor-1',
 			activity.lastActivityAt,
 			new Date('2026-11-10T12:00:00.000Z'),
+			new Date('2026-11-10T12:00:00.000Z'),
+			true,
 		);
+		expect(activityRepository.claimIdleActor.mock.invocationCallOrder[0]).toBeLessThan(
+			sandbox.stop.mock.invocationCallOrder[0],
+		);
+	});
+
+	it('does not stop when the conditional claim finds an active command', async () => {
+		const activity = makeActivity({
+			lastActivityAt: new Date('2026-11-10T11:54:00.000Z'),
+			activeCommandCount: 1,
+			activeCommandLeaseUntil: new Date('2026-11-10T12:05:00.000Z'),
+		});
+		activityRepository.findAll.mockResolvedValue([activity]);
+		activityRepository.claimIdleActor.mockResolvedValue(false);
+		const sandbox = mock<TestWorkspaceSandbox>();
+		vi.mocked(createSandbox).mockResolvedValue(sandbox);
+
+		await service.cleanupIdleActors(undefined, Date.parse('2026-11-10T12:00:00.000Z'));
+
+		expect(sandbox.stop).not.toHaveBeenCalled();
+		expect(activityRepository.markSuspended).not.toHaveBeenCalled();
+	});
+
+	it('records command start, heartbeat, and exit activity', async () => {
+		const recorder = service.createCommandActivityRecorder(connection, {
+			autoStopMinutes: 5,
+			autoDeleteMinutes: 1_440,
+			ephemeral: false,
+		});
+		activityRepository.recordCommandStarted.mockResolvedValue(true);
+		activityRepository.recordCommandHeartbeat.mockResolvedValue(true);
+
+		await recorder('n8n-actor-1', 'started', 600_000);
+		await recorder('n8n-actor-1', 'heartbeat', 600_000);
+		await recorder('n8n-actor-1', 'finished', 600_000);
+
+		expect(activityRepository.recordCommandStarted).toHaveBeenCalledWith('n8n-actor-1', 600_000);
+		expect(activityRepository.recordCommandHeartbeat).toHaveBeenCalledWith('n8n-actor-1', 600_000);
+		expect(activityRepository.recordCommandFinished).toHaveBeenCalledWith('n8n-actor-1');
 	});
 
 	it('deletes a suspended Actor after its retention interval', async () => {
@@ -142,6 +197,7 @@ describe('SubstrateActorLifecycleService', () => {
 		expect(activityRepository.deleteIfUnchanged).toHaveBeenCalledWith(
 			activity.actorId,
 			activity.lastActivityAt,
+			new Date('2026-11-10T12:00:00.000Z'),
 		);
 	});
 

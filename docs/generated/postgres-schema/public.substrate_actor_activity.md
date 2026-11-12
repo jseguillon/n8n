@@ -4,6 +4,8 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
+| activeCommandCount | integer | 0 | false |  |  |  |
+| activeCommandLeaseUntil | timestamp(3) with time zone |  | true |  |  |  |
 | actorId | varchar(63) |  | false |  |  |  |
 | autoDeleteMinutes | double precision |  | false |  |  |  |
 | autoStopMinutes | double precision |  | false |  |  |  |
@@ -12,6 +14,7 @@
 | ephemeral | boolean | false | false |  |  |  |
 | lastActivityAt | timestamp(3) with time zone |  | false |  |  |  |
 | lastSuspendedAt | timestamp(3) with time zone |  | true |  |  |  |
+| suspensionClaimedAt | timestamp(3) with time zone |  | true |  |  |  |
 | updatedAt | timestamp(3) with time zone | CURRENT_TIMESTAMP(3) | false |  |  |  |
 
 ## Constraints
@@ -19,6 +22,7 @@
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
 | PK_40426ea42a2c93d4637dbb83c19 | PRIMARY KEY | PRIMARY KEY ("actorId") |
+| substrate_actor_activity_activeCommandCount_not_null | n | NOT NULL "activeCommandCount" |
 | substrate_actor_activity_actorId_not_null | n | NOT NULL "actorId" |
 | substrate_actor_activity_autoDeleteMinutes_not_null | n | NOT NULL "autoDeleteMinutes" |
 | substrate_actor_activity_autoStopMinutes_not_null | n | NOT NULL "autoStopMinutes" |
@@ -42,6 +46,8 @@ erDiagram
 
 
 "public.substrate_actor_activity" {
+  integer activeCommandCount
+  timestamp_3__with_time_zone activeCommandLeaseUntil
   varchar_63_ actorId
   double_precision autoDeleteMinutes
   double_precision autoStopMinutes
@@ -50,6 +56,7 @@ erDiagram
   boolean ephemeral
   timestamp_3__with_time_zone lastActivityAt
   timestamp_3__with_time_zone lastSuspendedAt
+  timestamp_3__with_time_zone suspensionClaimedAt
   timestamp_3__with_time_zone updatedAt
 }
 ```
