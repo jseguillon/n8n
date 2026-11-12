@@ -577,6 +577,8 @@ export class InstanceAiSettingsService {
 			}
 			if (update.substrateCredentialId !== null)
 				this.rejectManagedFields(update, ['substrateCredentialId'], this.deploymentLabel());
+			if (update.sandboxProvider === 'substrate')
+				this.rejectManagedFields(update, ['sandboxProvider'], this.deploymentLabel());
 		}
 		const {
 			modelCredentialId: initialModelCredentialId,
@@ -1154,31 +1156,7 @@ export class InstanceAiSettingsService {
 		return this.connectionForVerification(prepared);
 	}
 
-	async resolveSubstrateConfig(
-		connection?: InstanceAiConnectionUpdate,
-		credentialId?: string,
-		user?: User,
-	) {
-		if (credentialId) {
-			if (connection || !user)
-				throw new UnprocessableRequestError('Choose one Substrate credential connection');
-			const available = await this.instanceCredentialBroker.listForUse(
-				INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY,
-			);
-			if (!available.some(({ id }) => id === credentialId))
-				throw new ForbiddenError('Substrate credential is not available');
-			const credential = await this.credentialsFinderService.findCredentialForUser(
-				credentialId,
-				user,
-				['credential:read'],
-			);
-			if (!credential || credential.type !== 'substrateApi')
-				throw new ForbiddenError('Substrate credential is not available');
-			connection = {
-				type: credential.type,
-				data: await this.credentialsService.decrypt(credential, true),
-			};
-		}
+	async resolveSubstrateConfig(connection?: InstanceAiConnectionUpdate) {
 		return await this.sandboxSettingsService.getSubstrateConfig(connection);
 	}
 

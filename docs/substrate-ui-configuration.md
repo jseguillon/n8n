@@ -17,6 +17,7 @@ instance credential. Deployment settings remain with the server operator.
 | Static bearer access token | Optional password field / encrypted instance credential | Same storage path and redaction behavior as other provider credentials |
 | Renewable token file path | Server environment and mount only | The operator owns file access and renewal |
 | Private CA file and TLS server-name override | Server environment only | The operator owns the trust boundary |
+| Router client identity bundle | Server environment and mount only | Authenticates n8n to the router through mTLS |
 | Kubernetes identity, worker images, and template definitions | Server operator | They are not sandbox connection fields |
 | Timeouts and lifecycle policy | Server operator | They control runtime behavior |
 
@@ -38,13 +39,15 @@ token's path or value.
 The connection is stored as a `substrateApi` instance credential. Settings keep
 its assignment, not plaintext connection secrets. The existing n8n encryption
 and secret-redaction mechanisms apply. Editing restores redacted secrets on the
-backend. Selecting another existing Substrate credential verifies it on the
-backend without loading its secret into the selection form.
+backend. Selecting an existing Substrate credential uses the same saved-credential
+selection and assignment flow as Daytona and n8n Sandbox. It does not load the
+secret into the selection form. New or edited connections use the sandbox
+verification endpoint before the dialog saves them.
 
 Credential edits require both the settings permission and
-`credential:manageInstance`. Existing credential selection must also pass the
-credential read/availability checks. These are instance-admin settings, not
-per-Agent or per-user connection overrides.
+`credential:manageInstance`. Existing credential selection uses the standard
+instance-credential availability and assignment checks. These are instance-admin
+settings, not per-Agent or per-user connection overrides.
 
 ## Server-owned configuration
 
@@ -56,6 +59,7 @@ or a local port-forward usually needs operator configuration:
 environment:
   SUBSTRATE_TOKEN_FILE: /run/substrate/token
   SUBSTRATE_CA_FILE: /run/substrate/ca.crt
+  SUBSTRATE_ROUTER_CREDENTIAL_FILE: /run/substrate/router-identity.pem
   SUBSTRATE_SERVER_NAME: api.ate-system.svc
 volumes:
   - /operator/connection:/run/substrate:ro
@@ -64,6 +68,11 @@ volumes:
 The mounted token takes precedence over any static credential token. It is read
 again for each control RPC, so external token renewal does not require an n8n
 restart. A UI-entered static token is not automatically renewed.
+
+The router identity bundle contains the client certificate chain and private
+key. The router must trust its identity. The Control API bearer token does not
+replace this bundle. See the external installation guide for identity issuance
+and renewal.
 
 To use UI-owned connection settings, do not force these values in the process
 environment:

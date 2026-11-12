@@ -108,10 +108,10 @@ describe('InstanceAiSettingsService', () => {
 		expect(JSON.stringify(result)).not.toContain('/server/');
 	});
 
-	it('rejects verification of an unavailable Substrate credential before decryption', async () => {
-		await expect(
-			service.resolveSubstrateConfig(undefined, 'unavailable', mock<User>()),
-		).rejects.toThrow('not available');
+	it('resolves the assigned Substrate connection through the shared sandbox settings service', async () => {
+		await service.resolveSubstrateConfig();
+		expect(sandboxSettingsService.getSubstrateConfig).toHaveBeenCalledWith(undefined);
+		expect(credentialsFinderService.findCredentialForUser).not.toHaveBeenCalled();
 		expect(credentialsService.decrypt).not.toHaveBeenCalled();
 	});
 
@@ -478,6 +478,49 @@ describe('InstanceAiSettingsService', () => {
 						memberUser,
 					),
 				).rejects.toThrow('permission');
+				expect(credentialsService.createInstanceCredential).not.toHaveBeenCalled();
+			});
+
+			it('assigns an existing Substrate credential through the broker without requiring credential editing', async () => {
+				const settingsManager = mock<User>({ role: { scopes: [{ slug: 'instanceAi:manage' }] } });
+				instanceCredentialBroker.resolveForUse.mockResolvedValue({
+					id: 'existing-substrate',
+					name: 'Existing sandbox',
+					type: 'substrateApi',
+					data: {
+						endpoint: 'api.example.test:443',
+						routerUrl: 'https://router.example.test',
+						atespace: 'sandboxes',
+						template: 'sandbox',
+					},
+				});
+				await service.updateAdminSettings(
+					{
+						substrateCredentialId: 'existing-substrate',
+						sandboxProvider: 'substrate',
+					},
+					settingsManager,
+				);
+				expect(instanceCredentialBroker.assignForUse).toHaveBeenCalledWith(
+					expect.objectContaining({ id: 'instance-ai:sandbox:substrate' }),
+					'existing-substrate',
+					operationContext,
+				);
+				expect(credentialsService.createInstanceCredential).not.toHaveBeenCalled();
+				expect(credentialsService.updateInstanceCredential).not.toHaveBeenCalled();
+				expect(credentialsFinderService.findCredentialForUser).not.toHaveBeenCalled();
+			});
+
+			it.each([
+				{ sandboxProvider: 'substrate' as const },
+				{ substrateCredentialId: 'existing-substrate' },
+				{ sandboxConnection: { type: 'substrateApi', data: {} } },
+			])('rejects unsupported direct Substrate changes behind the proxy: %j', async (update) => {
+				aiService.isProxyEnabled.mockReturnValue(true);
+				await expect(service.updateAdminSettings(update, adminUser)).rejects.toThrow(
+					'proxy-managed',
+				);
+				expect(instanceCredentialBroker.assignForUse).not.toHaveBeenCalled();
 				expect(credentialsService.createInstanceCredential).not.toHaveBeenCalled();
 			});
 

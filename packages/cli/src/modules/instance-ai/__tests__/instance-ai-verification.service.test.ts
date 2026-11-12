@@ -236,63 +236,74 @@ describe('InstanceAiVerificationService', () => {
 			expect(workspace.destroy).toHaveBeenCalled();
 		});
 
-		it('verifies the Substrate filesystem daemon', async () => {
-			settingsService.resolveSubstrateConfig.mockResolvedValue({
-				enabled: true,
-				provider: 'substrate',
-				connection: {
-					endpoint: 'api.example.test:443',
-					routerUrl: 'https://router.example.test',
-					atespace: 'test-space',
-					template: 'test-template',
-					tokenFile: '/server/token',
-					caFile: '/server/ca',
-					routerCredentialFile: '/server/router-credential-bundle.pem',
-					serverName: 'api.example.test',
-				},
-			});
-			Object.assign(globalConfig.instanceAi, {
-				substrateEndpoint: 'https://substrate.example.test',
-				substrateRouterUrl: 'https://router.example.test',
-				substrateAtespace: 'test-space',
-				substrateTemplate: 'test-template',
-				substrateTokenFile: '/run/secrets/substrate-token',
-				substrateCaFile: '/run/secrets/substrate-ca',
-				substrateRouterCredentialFile: '/run/secrets/router-credential-bundle.pem',
-				substrateServerName: 'substrate.example.test',
-			});
-			const workspace = {
-				init: vi.fn().mockResolvedValue(undefined),
-				destroy: vi.fn().mockResolvedValue(undefined),
-				sandbox: { executeCommand: vi.fn().mockResolvedValue({ exitCode: 0 }) },
-				filesystem: {
-					writeFile: vi.fn().mockResolvedValue(undefined),
-					readFile: vi.fn().mockResolvedValue(Buffer.from('ok')),
-					deleteFile: vi.fn().mockResolvedValue(undefined),
-				},
-			};
-			createSandboxMock.mockResolvedValue({} as never);
-			createWorkspaceMock.mockReturnValue(workspace as never);
+		it.each([false, true])(
+			'verifies a Substrate filesystem daemon with a draft connection=%s',
+			async (draft) => {
+				const connection = { type: 'substrateApi', data: { apiToken: '__redacted__' } };
+				const restored = { type: 'substrateApi', data: { apiToken: 'fixture-token' } };
+				settingsService.resolveSandboxConnectionForVerification.mockResolvedValue(restored);
+				settingsService.resolveSubstrateConfig.mockResolvedValue({
+					enabled: true,
+					provider: 'substrate',
+					connection: {
+						endpoint: 'api.example.test:443',
+						routerUrl: 'https://router.example.test',
+						atespace: 'test-space',
+						template: 'test-template',
+						tokenFile: '/server/token',
+						caFile: '/server/ca',
+						routerCredentialFile: '/server/router-credential-bundle.pem',
+						serverName: 'api.example.test',
+					},
+				});
+				Object.assign(globalConfig.instanceAi, {
+					substrateEndpoint: 'https://substrate.example.test',
+					substrateRouterUrl: 'https://router.example.test',
+					substrateAtespace: 'test-space',
+					substrateTemplate: 'test-template',
+					substrateTokenFile: '/run/secrets/substrate-token',
+					substrateCaFile: '/run/secrets/substrate-ca',
+					substrateRouterCredentialFile: '/run/secrets/router-credential-bundle.pem',
+					substrateServerName: 'substrate.example.test',
+				});
+				const workspace = {
+					init: vi.fn().mockResolvedValue(undefined),
+					destroy: vi.fn().mockResolvedValue(undefined),
+					sandbox: { executeCommand: vi.fn().mockResolvedValue({ exitCode: 0 }) },
+					filesystem: {
+						writeFile: vi.fn().mockResolvedValue(undefined),
+						readFile: vi.fn().mockResolvedValue(Buffer.from('ok')),
+						deleteFile: vi.fn().mockResolvedValue(undefined),
+					},
+				};
+				createSandboxMock.mockResolvedValue({} as never);
+				createWorkspaceMock.mockReturnValue(workspace as never);
 
-			await expect(service.verifySandbox(user, { provider: 'substrate' })).resolves.toMatchObject({
-				ok: true,
-			});
+				await expect(
+					service.verifySandbox(user, { provider: 'substrate', ...(draft ? { connection } : {}) }),
+				).resolves.toMatchObject({
+					ok: true,
+				});
+				expect(settingsService.resolveSubstrateConfig).toHaveBeenCalledWith(
+					draft ? restored : undefined,
+				);
 
-			expect(workspace.filesystem.writeFile).toHaveBeenCalledWith(
-				'/home/user/workspace/.n8n-substrate-verification',
-				'ok',
-				{ recursive: true },
-			);
-			expect(workspace.filesystem.readFile).toHaveBeenCalledWith(
-				'/home/user/workspace/.n8n-substrate-verification',
-			);
-			expect(workspace.filesystem.deleteFile).toHaveBeenCalledWith(
-				'/home/user/workspace/.n8n-substrate-verification',
-			);
-			expect(createSandboxMock).toHaveBeenCalledWith(
-				expect.objectContaining({ provider: 'substrate', ephemeral: true }),
-			);
-		});
+				expect(workspace.filesystem.writeFile).toHaveBeenCalledWith(
+					'/home/user/workspace/.n8n-substrate-verification',
+					'ok',
+					{ recursive: true },
+				);
+				expect(workspace.filesystem.readFile).toHaveBeenCalledWith(
+					'/home/user/workspace/.n8n-substrate-verification',
+				);
+				expect(workspace.filesystem.deleteFile).toHaveBeenCalledWith(
+					'/home/user/workspace/.n8n-substrate-verification',
+				);
+				expect(createSandboxMock).toHaveBeenCalledWith(
+					expect.objectContaining({ provider: 'substrate', ephemeral: true }),
+				);
+			},
+		);
 
 		it.each([
 			[16, 'unauthorized'],
