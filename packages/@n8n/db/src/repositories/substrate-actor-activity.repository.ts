@@ -16,6 +16,16 @@ export type SubstrateActorActivityInput = Pick<
 	'actorId' | 'connectionFingerprint' | 'autoStopMinutes' | 'autoDeleteMinutes' | 'ephemeral'
 >;
 
+export type SubstrateActorCommandCompletion = {
+	actorId: string;
+	activityAt: Date;
+	action: 'suspend' | 'delete';
+};
+
+export type SubstrateActorSuspensionClaim = SubstrateActorCommandCompletion & {
+	claimedAt: Date;
+};
+
 @Service()
 export class SubstrateActorActivityRepository {
 	private readonly table: SubstrateActorActivityTable;
@@ -177,7 +187,10 @@ export class SubstrateActorActivityRepository {
 		return (result.affected ?? 0) > 0;
 	}
 
-	async recordCommandFinished(actorId: string, activityAt = new Date()): Promise<void> {
+	async recordCommandFinished(
+		actorId: string,
+		activityAt = new Date(),
+	): Promise<SubstrateActorCommandCompletion | undefined> {
 		for (;;) {
 			const activity = await this.table.findOneBy({ actorId });
 			if (!activity || activity.suspensionClaimedAt) return;
@@ -192,6 +205,10 @@ export class SubstrateActorActivityRepository {
 			const remainingCommandCount = hasActiveCommands
 				? Math.max(0, activity.activeCommandCount - 1)
 				: 0;
+			const shouldStop =
+				activity.activeCommandCount > 0 &&
+				remainingCommandCount === 0 &&
+				activity.autoStopMinutes > 0;
 			const result = await this.table.update(
 				{ actorId, lastActivityAt: activity.lastActivityAt, suspensionClaimedAt: IsNull() },
 				{
@@ -202,7 +219,53 @@ export class SubstrateActorActivityRepository {
 						remainingCommandCount > 0 ? new Date(recordedAt.getTime() + 60_000) : null,
 				},
 			);
-			if ((result.affected ?? 0) > 0) return;
+			if ((result.affected ?? 0) > 0) {
+				if (!shouldStop) return;
+				return {
+					actorId,
+					activityAt: recordedAt,
+					action: activity.ephemeral ? 'delete' : 'suspend',
+				};
+			}
+		}
+	}
+
+	async claimCommandFinishedActor(
+		actorId: string,
+		claimedAt: Date,
+	): Promise<SubstrateActorSuspensionClaim | undefined> {
+		for (;;) {
+			const activity = await this.table.findOneBy({ actorId });
+			if (
+				!activity ||
+				activity.suspensionClaimedAt ||
+				activity.lastSuspendedAt !== null ||
+				activity.activeCommandCount !== 0 ||
+				(activity.activeCommandLeaseUntil !== null &&
+					activity.activeCommandLeaseUntil.getTime() > claimedAt.getTime()) ||
+				activity.autoStopMinutes <= 0
+			) {
+				return;
+			}
+
+			const result = await this.table.update(
+				{
+					actorId,
+					lastActivityAt: activity.lastActivityAt,
+					lastSuspendedAt: IsNull(),
+					suspensionClaimedAt: IsNull(),
+					activeCommandCount: 0,
+				},
+				{ suspensionClaimedAt: claimedAt, activeCommandLeaseUntil: null },
+			);
+			if ((result.affected ?? 0) > 0) {
+				return {
+					actorId,
+					activityAt: activity.lastActivityAt,
+					claimedAt,
+					action: activity.ephemeral ? 'delete' : 'suspend',
+				};
+			}
 		}
 	}
 

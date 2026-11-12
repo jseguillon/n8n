@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { nonnegativeIntSchema } from '../schemas';
 import { Config, Env } from '../decorators';
 
 const releaseChannelSchema = z.enum(['stable', 'beta', 'nightly', 'dev', 'rc']);
@@ -18,4 +19,8 @@ export class GenericConfig {
 	/** Seconds to wait for graceful shutdown (for example, finishing executions) before the process exits. */
 	@Env('N8N_GRACEFUL_SHUTDOWN_TIMEOUT')
 	gracefulShutdownTimeout: number = 30;
+
+	/** Time in milliseconds to wait after a Substrate command completes before n8n suspends its Actor. Set to 0 to suspend immediately. */
+	@Env('N8N_SUBSTRATE_SANDBOX_SUSPEND_DELAY_MS', nonnegativeIntSchema)
+	substrateSandboxSuspendDelayMs: number = 5_000;
 }

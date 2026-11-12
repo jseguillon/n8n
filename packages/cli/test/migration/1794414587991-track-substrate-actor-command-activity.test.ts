@@ -51,7 +51,7 @@ describe('TrackSubstrateActorCommandActivity migration', () => {
 		});
 	});
 
-	it('blocks an idle claim while a command lease is active, then permits it after exit', async () => {
+	it('blocks idle cleanup during a command and claims suspension after command exit', async () => {
 		const actorId = 'n8n-command-lease-test';
 		const activityRepository = Container.get(SubstrateActorActivityRepository);
 		const startedAt = new Date('2026-11-11T12:00:00.000Z');
@@ -74,9 +74,66 @@ describe('TrackSubstrateActorCommandActivity migration', () => {
 			activityRepository.claimIdleActor(actorId, startedAt, null, startedAt, startedAt),
 		).resolves.toBe(false);
 
-		await activityRepository.recordCommandFinished(actorId, finishedAt);
+		const completion = await activityRepository.recordCommandFinished(actorId, finishedAt);
+		expect(completion).toEqual({
+			actorId,
+			activityAt: finishedAt,
+			action: 'suspend',
+		});
+		const claim = await activityRepository.claimCommandFinishedActor(actorId, finishedAt);
+		expect(claim).toEqual({
+			actorId,
+			activityAt: finishedAt,
+			claimedAt: finishedAt,
+			action: 'suspend',
+		});
 		await expect(
-			activityRepository.claimIdleActor(actorId, finishedAt, null, finishedAt, finishedAt),
+			activityRepository.markSuspended(actorId, finishedAt, claim!.claimedAt, finishedAt),
+		).resolves.toBe(true);
+	});
+
+	it('allows the hourly fallback to claim a command lease that expired during restart', async () => {
+		const actorId = 'n8n-command-restart-test';
+		const activityRepository = Container.get(SubstrateActorActivityRepository);
+		const startedAt = new Date('2026-11-11T12:00:00.000Z');
+		const leaseExpiredAt = new Date(startedAt.getTime() + 660_001);
+
+		await activityRepository.recordActivity(
+			{
+				actorId,
+				connectionFingerprint: 'd'.repeat(64),
+				autoStopMinutes: 1,
+				autoDeleteMinutes: 1_440,
+				ephemeral: false,
+			},
+			startedAt,
+		);
+		await activityRepository.recordCommandStarted(actorId, 600_000, startedAt);
+
+		await expect(
+			activityRepository.claimIdleActor(actorId, startedAt, null, leaseExpiredAt, leaseExpiredAt),
+		).resolves.toBe(true);
+	});
+
+	it('allows hourly recovery to claim an Actor after its command lease expires', async () => {
+		const actorId = 'n8n-hourly-command-recovery-test';
+		const activityRepository = Container.get(SubstrateActorActivityRepository);
+		const startedAt = new Date('2026-11-11T12:00:00.000Z');
+		const sweepAt = new Date(startedAt.getTime() + 12 * 60 * 1_000);
+		await activityRepository.recordActivity(
+			{
+				actorId,
+				connectionFingerprint: 'e'.repeat(64),
+				autoStopMinutes: 1,
+				autoDeleteMinutes: 1_440,
+				ephemeral: false,
+			},
+			startedAt,
+		);
+		await activityRepository.recordCommandStarted(actorId, 600_000, startedAt);
+
+		await expect(
+			activityRepository.claimIdleActor(actorId, startedAt, null, sweepAt, sweepAt),
 		).resolves.toBe(true);
 	});
 

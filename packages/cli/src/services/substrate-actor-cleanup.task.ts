@@ -7,7 +7,7 @@ import { SubstrateActorLifecycleService } from './substrate-actor-lifecycle.serv
 @SystemTask()
 export class SubstrateActorCleanupTask implements SystemTask {
 	readonly name = 'substrate-actor-cleanup';
-	readonly schedule: SystemTaskSchedule = intervalFromSeconds(Time.minutes.toSeconds);
+	readonly schedule: SystemTaskSchedule = intervalFromSeconds(Time.hours.toSeconds);
 	readonly target = clusterTarget({ scheduler: { retryOnFailure: true } });
 
 	constructor(private readonly lifecycle: SubstrateActorLifecycleService) {}

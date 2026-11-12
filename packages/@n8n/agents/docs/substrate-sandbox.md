@@ -67,13 +67,20 @@ Actor and restore its state. `destroy()` deletes it.
 Verification workspaces are deleted after the probe.
 Agent workspaces use the existing project, Agent, and principal identity.
 Assistant workspaces use a thread-derived identity.
-n8n records Substrate Actor activity in its database. A cluster-leader task
-suspends idle persistent Actors and deletes them after their stopped retention
-interval. It runs once per minute and covers Instance AI and Agent Actors.
-An in-flight workspace command holds an activity lease, so idle cleanup waits for
-the command to exit or reach its command timeout. The command timeout still
-applies independently of the idle timer. If the execution stream disconnects,
-n8n resumes it by execution ID instead of starting the command again.
+n8n records Substrate Actor activity in its database. When automatic suspension
+is enabled, n8n waits for the configured command suspend delay after the final
+command exits or times out. The delay defaults to 5 seconds. A new command during
+this interval cancels the pending suspension. n8n then suspends a persistent
+Actor or deletes an ephemeral Actor without keeping a snapshot.
+An in-flight command holds an activity lease, so cleanup cannot suspend its
+Actor. The command timeout still applies independently of the suspend behavior.
+If the execution stream disconnects, n8n resumes it by execution ID instead of
+starting the command again.
+
+A cluster-leader task runs once per hour as a recovery check for Actors whose
+command-exit cleanup was missed, for example after an n8n restart. It uses the
+configured auto-stop interval and deletes suspended Actors after their retention
+interval.
 
 Instance AI uses `N8N_INSTANCE_AI_SANDBOX_AUTO_STOP_MINUTES` (default 15) and
 `N8N_INSTANCE_AI_SANDBOX_AUTO_DELETE_MINUTES` (default 10080). Agent workspaces
@@ -81,11 +88,16 @@ use `N8N_AGENTS_AI_SANDBOX_WORKSPACE_AUTO_STOP_MINUTES` (default 5) and
 `N8N_AGENTS_AI_SANDBOX_WORKSPACE_AUTO_DELETE_MINUTES` (default 1440). Agent
 knowledge sandboxes use `N8N_AGENTS_AI_SANDBOX_KNOWLEDGE_AUTO_STOP_MINUTES`
 (default 15) and `N8N_AGENTS_AI_SANDBOX_KNOWLEDGE_AUTO_DELETE_MINUTES` (default
-10080). Set an auto-stop value to `0` to disable automatic suspension. Set an
-auto-delete value to a negative number to keep suspended Actor files. Set it to
-`0` to delete an Actor when it is suspended. Ephemeral Agent knowledge Actors
-are deleted at the auto-stop interval. Daytona auto-archive does not apply to
-Substrate.
+10080). These auto-stop intervals control whether n8n suspends an Actor after a
+command and provide the recovery threshold for an Actor that missed
+command-exit cleanup. Set an auto-stop value to `0` to disable automatic
+suspension. Set an auto-delete value to a negative number to keep suspended
+Actor files. Set it to `0` to delete an Actor when it is suspended. Daytona
+auto-archive does not apply to Substrate.
+
+Set `N8N_SUBSTRATE_SANDBOX_SUSPEND_DELAY_MS` to change the command suspend delay
+in milliseconds. Set it to `0` to suspend or delete an Actor as soon as its final
+command exits or times out.
 
 The ActorTemplate router target must match the daemon listen port and prepare
 `/home/user/workspace`. Commands run under the daemon's configured user.

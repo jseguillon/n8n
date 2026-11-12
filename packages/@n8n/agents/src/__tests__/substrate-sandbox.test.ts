@@ -141,9 +141,10 @@ describe('Substrate sandbox daemon protocol', () => {
 			.mockResolvedValueOnce(new Response('ok'))
 			.mockResolvedValueOnce(new Response(executionStream));
 		vi.stubGlobal('fetch', fetch);
+		const onActivity = vi.fn().mockResolvedValue(undefined);
 		const onCommandActivity = vi.fn().mockResolvedValue(true);
 		onCommandActivity.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-		const sandbox = new SubstrateSandbox({ ...connection, onCommandActivity });
+		const sandbox = new SubstrateSandbox({ ...connection, onActivity, onCommandActivity });
 
 		const execution = sandbox.executeCommand('sleep', ['600'], { timeout: 600_000 });
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
@@ -151,6 +152,9 @@ describe('Substrate sandbox daemon protocol', () => {
 		expect(actorId).toMatch(/^n8n-/);
 		expect(onCommandActivity).toHaveBeenNthCalledWith(1, actorId, 'started', 600_000, undefined);
 		expect(onCommandActivity).toHaveBeenNthCalledWith(2, actorId, 'started', 600_000, undefined);
+		expect(onCommandActivity.mock.invocationCallOrder[0]).toBeLessThan(
+			onActivity.mock.invocationCallOrder[0],
+		);
 		expect(onCommandActivity.mock.calls.some(([, phase]) => phase === 'finished')).toBe(false);
 
 		finishExecution();
