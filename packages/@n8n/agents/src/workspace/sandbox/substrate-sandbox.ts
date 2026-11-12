@@ -16,7 +16,7 @@ import { z } from 'zod';
 import { BaseSandbox } from './base-sandbox';
 import { toShellCommand } from './shell-command';
 import { SubstrateControl, type SubstrateConnection } from './substrate-control';
-import type { SandboxFileClient, SubstrateCommandActivityPhase } from './types';
+import type { SandboxFileClient, SubstrateOperationRecorder } from './types';
 import type { CommandResult, ExecuteCommandOptions } from '../types';
 
 const fileStat = z
@@ -90,13 +90,7 @@ export interface SubstrateSandboxOptions extends SubstrateConnection {
 	id?: string;
 	timeout?: number;
 	ephemeral?: boolean;
-	onActivity?: (actorId: string, abortSignal?: AbortSignal) => Promise<void>;
-	onCommandActivity?: (
-		actorId: string,
-		phase: SubstrateCommandActivityPhase,
-		commandTimeoutMs: number,
-		abortSignal?: AbortSignal,
-	) => Promise<boolean>;
+	onOperation?: SubstrateOperationRecorder;
 	onDestroyed?: (actorId: string) => Promise<void>;
 }
 
@@ -126,8 +120,15 @@ export class SubstrateSandbox extends BaseSandbox {
 	}
 
 	async start(): Promise<void> {
-		await this.control.ensureActor(this.id);
-		await this.request('/healthz');
+		await this.withOperation(
+			this.timeout,
+			undefined,
+			async (signal) => {
+				await this.control.ensureActor(this.id);
+				await this.request('/healthz', { signal });
+			},
+			false,
+		);
 	}
 
 	async stop(): Promise<void> {
@@ -182,22 +183,16 @@ export class SubstrateSandbox extends BaseSandbox {
 		url.search = new URLSearchParams(query).toString();
 		const headers = new Headers(init.headers);
 		headers.set('ate-target-actor', `${this.options.atespace}/${this.id}`);
-		await this.recordActivity(init.signal);
 		const dispatcher = await this.getRouterAgent(url);
-		let response: Response;
-		try {
-			response = await fetch(url, {
-				...init,
-				redirect: 'error',
-				headers,
-				signal: init.signal ?? AbortSignal.timeout(this.timeout),
-				// Node's fetch accepts the Undici dispatcher option for mTLS.
-				// @ts-expect-error dispatcher is a Node fetch extension
-				dispatcher,
-			});
-		} finally {
-			await this.recordActivity();
-		}
+		const response = await fetch(url, {
+			...init,
+			redirect: 'error',
+			headers,
+			signal: init.signal ?? AbortSignal.timeout(this.timeout),
+			// Node's fetch accepts the Undici dispatcher option for mTLS.
+			// @ts-expect-error dispatcher is a Node fetch extension
+			dispatcher,
+		});
 		if (!response.ok) {
 			await response.body?.cancel();
 			throw new SandboxServiceError(
@@ -259,56 +254,51 @@ export class SubstrateSandbox extends BaseSandbox {
 		args: string[] = [],
 		options?: ExecuteCommandOptions,
 	): Promise<CommandResult> {
-		const timeout = options?.timeout ?? this.timeout;
-		if (this.options.onCommandActivity) {
-			let started = await this.options.onCommandActivity(
-				this.id,
-				'started',
-				timeout,
-				options?.abortSignal,
-			);
-			while (!started) {
-				options?.abortSignal?.throwIfAborted();
-				await wait(
-					100,
-					undefined,
-					options?.abortSignal ? { signal: options.abortSignal } : undefined,
-				);
-				started = await this.options.onCommandActivity(
-					this.id,
-					'started',
-					timeout,
-					options?.abortSignal,
-				);
-			}
-		} else {
-			await this.recordActivity(options?.abortSignal);
-		}
+		return await this.withOperation(
+			options?.timeout ?? this.timeout,
+			options?.abortSignal,
+			async (signal) =>
+				await this.executeCommandWithActivity(command, args, { ...options, abortSignal: signal }),
+		);
+	}
 
-		const heartbeat = setInterval(() => {
-			if (this.options.onCommandActivity) {
-				void this.options.onCommandActivity(this.id, 'heartbeat', timeout).catch(() => undefined);
-			} else if (this.options.onActivity) {
-				void this.recordActivity().catch(() => undefined);
+	private async withOperation<T>(
+		timeoutMs: number,
+		abortSignal: AbortSignal | undefined,
+		operation: (signal: AbortSignal) => Promise<T>,
+		ensureRunning = true,
+	): Promise<T> {
+		const recorder = this.options.onOperation;
+		const operationId = randomUUID();
+		const signal = AbortSignal.any([
+			AbortSignal.timeout(timeoutMs + 30_000),
+			...(abortSignal ? [abortSignal] : []),
+		]);
+		if (recorder) {
+			signal.throwIfAborted();
+			while (!(await recorder(this.id, operationId, 'started', timeoutMs, signal))) {
+				await wait(100, undefined, { signal });
 			}
+		}
+		let heartbeatWork = Promise.resolve();
+		const heartbeat = setInterval(() => {
+			if (recorder)
+				heartbeatWork = heartbeatWork
+					.then(async () => {
+						await recorder(this.id, operationId, 'heartbeat', timeoutMs);
+					})
+					.catch(() => undefined);
 		}, 15_000);
 		heartbeat.unref();
 		try {
-			return await this.executeCommandWithActivity(command, args, options);
+			signal.throwIfAborted();
+			if (ensureRunning) await this.ensureRunning({ abortSignal: signal });
+			return await operation(signal);
 		} finally {
 			clearInterval(heartbeat);
-			if (this.options.onCommandActivity) {
-				await this.options.onCommandActivity(this.id, 'finished', timeout).catch(() => undefined);
-			} else {
-				await this.recordActivity().catch(() => undefined);
-			}
+			await heartbeatWork;
+			await recorder?.(this.id, operationId, 'finished', timeoutMs).catch(() => undefined);
 		}
-	}
-
-	private async recordActivity(abortSignal?: AbortSignal | null): Promise<void> {
-		if (!this.options.onActivity) return;
-		if (abortSignal) await this.options.onActivity(this.id, abortSignal);
-		else await this.options.onActivity(this.id);
 	}
 
 	private async executeCommandWithActivity(
@@ -486,8 +476,12 @@ export class SubstrateSandbox extends BaseSandbox {
 	}
 
 	async readFile(_id: string, path: string, abortSignal?: AbortSignal): Promise<Buffer> {
-		return Buffer.from(
-			await (await this.request('/files/content', { signal: abortSignal }, { path })).arrayBuffer(),
+		return await this.withOperation(this.timeout, abortSignal, async (abortSignal) =>
+			Buffer.from(
+				await (
+					await this.request('/files/content', { signal: abortSignal }, { path })
+				).arrayBuffer(),
+			),
 		);
 	}
 	async writeFile(
@@ -497,15 +491,17 @@ export class SubstrateSandbox extends BaseSandbox {
 		overwrite = true,
 		abortSignal?: AbortSignal,
 	): Promise<void> {
-		await this.request(
-			'/files',
-			{
-				method: 'PUT',
-				body: typeof content === 'string' ? content : new Uint8Array(content),
-				signal: abortSignal,
-			},
-			{ path, overwrite: String(overwrite) },
-		);
+		await this.withOperation(this.timeout, abortSignal, async (abortSignal) => {
+			await this.request(
+				'/files',
+				{
+					method: 'PUT',
+					body: typeof content === 'string' ? content : new Uint8Array(content),
+					signal: abortSignal,
+				},
+				{ path, overwrite: String(overwrite) },
+			);
+		});
 	}
 	async appendFile(
 		_id: string,
@@ -513,15 +509,17 @@ export class SubstrateSandbox extends BaseSandbox {
 		content: FileContent,
 		abortSignal?: AbortSignal,
 	): Promise<void> {
-		await this.request(
-			'/files',
-			{
-				method: 'POST',
-				body: typeof content === 'string' ? content : new Uint8Array(content),
-				signal: abortSignal,
-			},
-			{ path },
-		);
+		await this.withOperation(this.timeout, abortSignal, async (abortSignal) => {
+			await this.request(
+				'/files',
+				{
+					method: 'POST',
+					body: typeof content === 'string' ? content : new Uint8Array(content),
+					signal: abortSignal,
+				},
+				{ path },
+			);
+		});
 	}
 	async deleteFile(
 		_id: string,
@@ -529,30 +527,36 @@ export class SubstrateSandbox extends BaseSandbox {
 		options?: DeleteFileOptions,
 		abortSignal?: AbortSignal,
 	): Promise<void> {
-		await this.request(
-			'/files',
-			{ method: 'DELETE', signal: abortSignal },
-			{
-				path,
-				recursive: String(options?.recursive ?? false),
-				force: String(options?.force ?? false),
-			},
-		);
+		await this.withOperation(this.timeout, abortSignal, async (abortSignal) => {
+			await this.request(
+				'/files',
+				{ method: 'DELETE', signal: abortSignal },
+				{
+					path,
+					recursive: String(options?.recursive ?? false),
+					force: String(options?.force ?? false),
+				},
+			);
+		});
 	}
 	async copyFile(_id: string, request: CopyFileRequest, abortSignal?: AbortSignal): Promise<void> {
-		await this.request('/files/copy', {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify(request),
-			signal: abortSignal,
+		await this.withOperation(this.timeout, abortSignal, async (abortSignal) => {
+			await this.request('/files/copy', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(request),
+				signal: abortSignal,
+			});
 		});
 	}
 	async moveFile(_id: string, request: MoveFileRequest, abortSignal?: AbortSignal): Promise<void> {
-		await this.request('/files/move', {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify(request),
-			signal: abortSignal,
+		await this.withOperation(this.timeout, abortSignal, async (abortSignal) => {
+			await this.request('/files/move', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(request),
+				signal: abortSignal,
+			});
 		});
 	}
 	async mkdir(
@@ -561,24 +565,28 @@ export class SubstrateSandbox extends BaseSandbox {
 		recursive = false,
 		abortSignal?: AbortSignal,
 	): Promise<void> {
-		await this.request(
-			'/mkdir',
-			{ method: 'POST', signal: abortSignal },
-			{ path, recursive: String(recursive) },
-		);
+		await this.withOperation(this.timeout, abortSignal, async (abortSignal) => {
+			await this.request(
+				'/mkdir',
+				{ method: 'POST', signal: abortSignal },
+				{ path, recursive: String(recursive) },
+			);
+		});
 	}
 	async listFiles(_id: string, options?: ListFilesOptions, abortSignal?: AbortSignal) {
-		return z
-			.array(fileEntry)
-			.parse(
-				await (
-					await this.request('/files', { signal: abortSignal }, { path: options?.path ?? '/' })
-				).json(),
-			);
+		return await this.withOperation(this.timeout, abortSignal, async (abortSignal) =>
+			z
+				.array(fileEntry)
+				.parse(
+					await (
+						await this.request('/files', { signal: abortSignal }, { path: options?.path ?? '/' })
+					).json(),
+				),
+		);
 	}
 	async stat(_id: string, path: string, abortSignal?: AbortSignal) {
-		return fileStat.parse(
-			await (await this.request('/stat', { signal: abortSignal }, { path })).json(),
+		return await this.withOperation(this.timeout, abortSignal, async (abortSignal) =>
+			fileStat.parse(await (await this.request('/stat', { signal: abortSignal }, { path })).json()),
 		);
 	}
 }

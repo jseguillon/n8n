@@ -73,6 +73,7 @@ describe('Substrate sandbox daemon protocol', () => {
 			);
 		vi.stubGlobal('fetch', fetch);
 		const sandbox = new SubstrateSandbox(connection);
+		sandbox.status = 'running';
 		expect(await sandbox.listFiles(sandbox.id, { path: '/home/user' })).toEqual([
 			{
 				name: 'check.txt',
@@ -96,24 +97,42 @@ describe('Substrate sandbox daemon protocol', () => {
 		const fetch = vi.fn().mockResolvedValue(new Response('ok'));
 		vi.stubGlobal('fetch', fetch);
 		const sandbox = new SubstrateSandbox(connection);
+		sandbox.status = 'running';
 		const signal = AbortSignal.timeout(1_000);
 
 		await sandbox.readFile(sandbox.id, '/home/user/check.txt', signal);
 
-		expect(fetch).toHaveBeenCalledWith(expect.any(URL), expect.objectContaining({ signal }));
+		const forwarded = fetch.mock.calls[0]?.[1].signal;
+		expect(forwarded).toBeInstanceOf(AbortSignal);
+		expect(forwarded.aborted).toBe(false);
 	});
 
-	it('records Actor activity before and after router requests', async () => {
+	it('records one operation around each file request', async () => {
 		const fetch = vi.fn().mockResolvedValue(new Response('ok'));
-		const onActivity = vi.fn().mockResolvedValue(undefined);
+		const onOperation = vi.fn().mockResolvedValue(true);
 		vi.stubGlobal('fetch', fetch);
-		const sandbox = new SubstrateSandbox({ ...connection, id: 'test-actor', onActivity });
+		const sandbox = new SubstrateSandbox({ ...connection, id: 'test-actor', onOperation });
+		sandbox.status = 'running';
 
 		await sandbox.readFile(sandbox.id, '/home/user/check.txt');
 
-		expect(onActivity).toHaveBeenCalledTimes(2);
-		expect(onActivity).toHaveBeenNthCalledWith(1, 'n8n-test-actor');
-		expect(onActivity).toHaveBeenNthCalledWith(2, 'n8n-test-actor');
+		expect(onOperation).toHaveBeenCalledTimes(2);
+		const operationId = onOperation.mock.calls[0]?.[1];
+		expect(onOperation).toHaveBeenNthCalledWith(
+			1,
+			'n8n-test-actor',
+			operationId,
+			'started',
+			300_000,
+			expect.any(AbortSignal),
+		);
+		expect(onOperation).toHaveBeenNthCalledWith(
+			2,
+			'n8n-test-actor',
+			operationId,
+			'finished',
+			300_000,
+		);
 	});
 
 	it('keeps command activity open until the execution stream exits', async () => {
@@ -136,30 +155,102 @@ describe('Substrate sandbox daemon protocol', () => {
 				});
 			},
 		});
-		const fetch = vi
-			.fn()
-			.mockResolvedValueOnce(new Response('ok'))
-			.mockResolvedValueOnce(new Response(executionStream));
+		const fetch = vi.fn().mockResolvedValueOnce(new Response(executionStream));
 		vi.stubGlobal('fetch', fetch);
-		const onActivity = vi.fn().mockResolvedValue(undefined);
-		const onCommandActivity = vi.fn().mockResolvedValue(true);
-		onCommandActivity.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-		const sandbox = new SubstrateSandbox({ ...connection, onActivity, onCommandActivity });
+		const onOperation = vi.fn().mockResolvedValue(true);
+		onOperation.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+		const sandbox = new SubstrateSandbox({ ...connection, onOperation });
+		sandbox.status = 'running';
 
 		const execution = sandbox.executeCommand('sleep', ['600'], { timeout: 600_000 });
-		await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-		const actorId = onCommandActivity.mock.calls[0]?.[0];
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+		const actorId = onOperation.mock.calls[0]?.[0];
+		const operationId = onOperation.mock.calls[0]?.[1];
 		expect(actorId).toMatch(/^n8n-/);
-		expect(onCommandActivity).toHaveBeenNthCalledWith(1, actorId, 'started', 600_000, undefined);
-		expect(onCommandActivity).toHaveBeenNthCalledWith(2, actorId, 'started', 600_000, undefined);
-		expect(onCommandActivity.mock.invocationCallOrder[0]).toBeLessThan(
-			onActivity.mock.invocationCallOrder[0],
+		expect(onOperation).toHaveBeenNthCalledWith(
+			1,
+			actorId,
+			operationId,
+			'started',
+			600_000,
+			expect.any(AbortSignal),
 		);
-		expect(onCommandActivity.mock.calls.some(([, phase]) => phase === 'finished')).toBe(false);
+		expect(onOperation).toHaveBeenNthCalledWith(
+			2,
+			actorId,
+			operationId,
+			'started',
+			600_000,
+			expect.any(AbortSignal),
+		);
+		expect(onOperation.mock.calls.some(([, , phase]) => phase === 'finished')).toBe(false);
 
 		finishExecution();
 		expect(await execution).toMatchObject({ success: true, exitCode: 0 });
-		expect(onCommandActivity).toHaveBeenLastCalledWith(actorId, 'finished', 600_000);
+		expect(onOperation).toHaveBeenLastCalledWith(actorId, operationId, 'finished', 600_000);
+	});
+
+	it('holds the file operation lease until the entire response body is consumed', async () => {
+		let complete!: () => void;
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(new TextEncoder().encode('first'));
+				complete = () => {
+					controller.enqueue(new TextEncoder().encode('last'));
+					controller.close();
+				};
+			},
+		});
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body)));
+		const onOperation = vi.fn().mockResolvedValue(true);
+		const sandbox = new SubstrateSandbox({ ...connection, onOperation });
+		sandbox.status = 'running';
+		const read = sandbox.readFile(sandbox.id, '/workspace/file');
+		await vi.waitFor(() => expect(onOperation).toHaveBeenCalledOnce());
+		expect(onOperation.mock.calls[0]?.[2]).toBe('started');
+		complete();
+		expect((await read).toString()).toBe('firstlast');
+		expect(onOperation.mock.calls.map(([, , phase]) => phase)).toEqual(['started', 'finished']);
+	});
+
+	it('still sends remote cancellation when lifecycle bookkeeping fails', async () => {
+		const controller = new AbortController();
+		const onOperation = vi
+			.fn()
+			.mockResolvedValueOnce(true)
+			.mockRejectedValue(new Error('bookkeeping unavailable'));
+		const fetch = vi
+			.fn()
+			.mockImplementationOnce(async () => {
+				controller.abort();
+				throw new DOMException('Cancelled', 'AbortError');
+			})
+			.mockResolvedValue(new Response('cancelled'));
+		vi.stubGlobal('fetch', fetch);
+		const sandbox = new SubstrateSandbox({ ...connection, onOperation });
+		sandbox.status = 'running';
+
+		await expect(
+			sandbox.executeCommand('sleep', ['30'], { abortSignal: controller.signal }),
+		).rejects.toThrow('Cancelled');
+		expect(fetch.mock.calls.map(([, options]) => options.method)).toEqual(['POST', 'DELETE']);
+		expect(fetch.mock.calls[1]?.[1].signal.aborted).toBe(false);
+		expect(onOperation.mock.calls.map(([, , phase]) => phase)).toEqual(['started', 'finished']);
+	});
+
+	it('releases a failed file operation without masking its router error', async () => {
+		const onOperation = vi
+			.fn()
+			.mockResolvedValueOnce(true)
+			.mockRejectedValue(new Error('bookkeeping unavailable'));
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('unavailable', { status: 503 })));
+		const sandbox = new SubstrateSandbox({ ...connection, onOperation });
+		sandbox.status = 'running';
+
+		await expect(sandbox.writeFile(sandbox.id, '/workspace/file', 'data')).rejects.toMatchObject({
+			status: 503,
+		});
+		expect(onOperation.mock.calls.map(([, , phase]) => phase)).toEqual(['started', 'finished']);
 	});
 
 	it('does not allow request headers to override the target Actor', async () => {
@@ -182,6 +273,7 @@ describe('Substrate sandbox daemon protocol', () => {
 		const fetch = vi.fn().mockResolvedValue(new Response('unavailable', { status: 503 }));
 		vi.stubGlobal('fetch', fetch);
 		const sandbox = new SubstrateSandbox(connection);
+		sandbox.status = 'running';
 
 		await expect(sandbox.readFile(sandbox.id, '/home/user/check.txt')).rejects.toEqual(
 			expect.objectContaining({

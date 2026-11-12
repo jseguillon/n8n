@@ -3,7 +3,7 @@ import {
 	initDbUpToMigration,
 	runSingleMigration,
 } from '@n8n/backend-test-utils';
-import { DbConnection, SubstrateActorActivity } from '@n8n/db';
+import { DbConnection } from '@n8n/db';
 import { Container } from '@n8n/di';
 import { DataSource } from '@n8n/typeorm';
 
@@ -29,22 +29,25 @@ describe('CreateSubstrateActorActivity migration', () => {
 	});
 
 	it('creates the persistent Actor activity table', async () => {
-		const repository = dataSource.getRepository(SubstrateActorActivity);
-		await repository.insert({
-			actorId: 'n8n-migration-test',
-			connectionFingerprint: 'a'.repeat(64),
-			lastActivityAt: new Date('2026-11-10T12:00:00.000Z'),
-			lastSuspendedAt: null,
-			autoStopMinutes: 5,
-			autoDeleteMinutes: 1_440,
-			ephemeral: false,
-		});
-
-		expect(await repository.findOneBy({ actorId: 'n8n-migration-test' })).toMatchObject({
-			connectionFingerprint: 'a'.repeat(64),
-			autoStopMinutes: 5,
-			autoDeleteMinutes: 1_440,
-			ephemeral: false,
-		});
+		const context = createTestMigrationContext(dataSource);
+		try {
+			const table = await context.queryRunner.getTable(
+				`${context.tablePrefix}substrate_actor_activity`,
+			);
+			expect(table?.columns.map(({ name }) => name)).toEqual(
+				expect.arrayContaining([
+					'actorId',
+					'connectionFingerprint',
+					'lastActivityAt',
+					'lastSuspendedAt',
+					'autoStopMinutes',
+					'autoDeleteMinutes',
+					'ephemeral',
+				]),
+			);
+			expect(table?.primaryColumns.map(({ name }) => name)).toEqual(['actorId']);
+		} finally {
+			await context.queryRunner.release();
+		}
 	});
 });

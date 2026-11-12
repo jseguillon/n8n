@@ -57,8 +57,7 @@ type Overrides = {
 	resolveTracingConfig?: InstanceAiSandboxServiceOptions['resolveTracingConfig'];
 	getTemplatesService?: InstanceAiSandboxServiceOptions['getTemplatesService'];
 	identityScheme?: InstanceAiSandboxServiceOptions['identityScheme'];
-	onSubstrateActivity?: InstanceAiSandboxServiceOptions['onSubstrateActivity'];
-	onSubstrateCommandActivity?: InstanceAiSandboxServiceOptions['onSubstrateCommandActivity'];
+	onSubstrateOperation?: InstanceAiSandboxServiceOptions['onSubstrateOperation'];
 	config?: Partial<InstanceAiConfig>;
 	runState?: Partial<InstanceAiSandboxRunState>;
 	backgroundTasks?: Partial<InstanceAiSandboxBackgroundTasks>;
@@ -99,8 +98,7 @@ function createSandboxService(overrides: Overrides = {}) {
 		resolveTracingConfig: overrides.resolveTracingConfig,
 		getTemplatesService: overrides.getTemplatesService ?? vi.fn(),
 		identityScheme: overrides.identityScheme,
-		onSubstrateActivity: overrides.onSubstrateActivity,
-		onSubstrateCommandActivity: overrides.onSubstrateCommandActivity,
+		onSubstrateOperation: overrides.onSubstrateOperation,
 	};
 	const service = new InstanceAiSandboxService(options);
 	return { service, logger, errorReporter, runState, backgroundTasks, settingsService, aiService };
@@ -117,7 +115,6 @@ describe('InstanceAiSandboxService', () => {
 
 	describe('config resolution', () => {
 		it('records persistent Substrate Actor activity with the configured lifecycle windows', async () => {
-			const onSubstrateActivity = vi.fn(async () => {});
 			const commandActivityRecorder = vi.fn(async () => true);
 			const onSubstrateCommandActivity = vi.fn(() => commandActivityRecorder);
 			const { service } = createSandboxService({
@@ -136,27 +133,25 @@ describe('InstanceAiSandboxService', () => {
 					substrateRouterCredentialFile: '/run/secrets/router-credential-bundle.pem',
 					substrateServerName: 'api.ate-system.svc',
 				},
-				onSubstrateActivity,
-				onSubstrateCommandActivity,
+				onSubstrateOperation: onSubstrateCommandActivity,
 			});
 
 			const config = service.getSandboxConfigFromEnv();
 			expect(config.provider).toBe('substrate');
 			if (!config.enabled || config.provider !== 'substrate')
 				throw new Error('Expected Substrate config');
-			await config.onActivity?.('n8n-test-actor');
-			await config.onCommandActivity?.('n8n-test-actor', 'started', 600_000);
+			await config.onOperation?.('n8n-test-actor', 'operation-1', 'started', 600_000);
 
-			expect(onSubstrateActivity).toHaveBeenCalledWith(
-				'n8n-test-actor',
-				expect.objectContaining({ atespace: 'n8n', template: 'sandbox' }),
-				{ autoStopMinutes: 15, autoDeleteMinutes: 10_080, ephemeral: false },
-			);
 			expect(onSubstrateCommandActivity).toHaveBeenCalledWith(
 				expect.objectContaining({ atespace: 'n8n', template: 'sandbox' }),
 				{ autoStopMinutes: 15, autoDeleteMinutes: 10_080, ephemeral: false },
 			);
-			expect(commandActivityRecorder).toHaveBeenCalledWith('n8n-test-actor', 'started', 600_000);
+			expect(commandActivityRecorder).toHaveBeenCalledWith(
+				'n8n-test-actor',
+				'operation-1',
+				'started',
+				600_000,
+			);
 		});
 
 		it('returns a disabled config when sandboxes are not enabled', async () => {

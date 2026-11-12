@@ -211,16 +211,10 @@ export type InstanceAiSandboxSettings = {
 	resolveN8nSandboxConfig: () => Promise<{ serviceUrl?: string; apiKey?: string }>;
 };
 
-export type InstanceAiSubstrateActivityRecorder = (
-	actorId: string,
+export type InstanceAiSubstrateOperationRecorder = (
 	connection: SubstrateSandboxConfig['connection'],
 	policy: SubstrateActorLifecyclePolicy,
-	abortSignal?: AbortSignal,
-) => Promise<void>;
-export type InstanceAiSubstrateCommandActivityRecorder = (
-	connection: SubstrateSandboxConfig['connection'],
-	policy: SubstrateActorLifecyclePolicy,
-) => NonNullable<SubstrateSandboxConfig['onCommandActivity']>;
+) => NonNullable<SubstrateSandboxConfig['onOperation']>;
 export type InstanceAiSubstrateDestroyRecorder = (actorId: string) => Promise<void>;
 
 /** Proxy collaborator that routes Daytona traffic through the AI assistant service. */
@@ -251,8 +245,7 @@ export type InstanceAiSandboxServiceOptions = {
 		threadId: string,
 		userId?: string,
 	) => Promise<{ userId: string; proxyConfig?: ServiceProxyConfig }>;
-	onSubstrateActivity?: InstanceAiSubstrateActivityRecorder;
-	onSubstrateCommandActivity?: InstanceAiSubstrateCommandActivityRecorder;
+	onSubstrateOperation?: InstanceAiSubstrateOperationRecorder;
 	onSubstrateDestroyed?: InstanceAiSubstrateDestroyRecorder;
 };
 
@@ -430,7 +423,7 @@ export class InstanceAiSandboxService {
 	}
 
 	private withSubstrateActivity(config: SubstrateSandboxConfig): SubstrateSandboxConfig {
-		if (!this.options.onSubstrateActivity || config.ephemeral) return config;
+		if (!this.options.onSubstrateOperation || config.ephemeral) return config;
 		const policy: SubstrateActorLifecyclePolicy = {
 			autoStopMinutes: this.instanceAiConfig.sandboxAutoStopMinutes,
 			autoDeleteMinutes: this.instanceAiConfig.sandboxAutoDeleteMinutes,
@@ -438,14 +431,7 @@ export class InstanceAiSandboxService {
 		};
 		return {
 			...config,
-			onActivity: async (actorId, abortSignal) => {
-				if (abortSignal) {
-					await this.options.onSubstrateActivity?.(actorId, config.connection, policy, abortSignal);
-				} else {
-					await this.options.onSubstrateActivity?.(actorId, config.connection, policy);
-				}
-			},
-			onCommandActivity: this.options.onSubstrateCommandActivity?.(config.connection, policy),
+			onOperation: this.options.onSubstrateOperation?.(config.connection, policy),
 			onDestroyed: this.options.onSubstrateDestroyed,
 		};
 	}

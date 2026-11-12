@@ -6,7 +6,7 @@
 <summary><strong>Table Definition</strong></summary>
 
 ```sql
-CREATE TABLE "substrate_actor_activity" ("actorId" varchar(63) PRIMARY KEY NOT NULL, "connectionFingerprint" varchar(64) NOT NULL, "lastActivityAt" datetime(3) NOT NULL, "lastSuspendedAt" datetime(3), "autoStopMinutes" real NOT NULL, "autoDeleteMinutes" real NOT NULL, "ephemeral" boolean NOT NULL DEFAULT (false), "createdAt" datetime(3) NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')), "updatedAt" datetime(3) NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')), "suspensionClaimedAt" datetime(3), "activeCommandCount" integer NOT NULL DEFAULT (0), "activeCommandLeaseUntil" datetime(3))
+CREATE TABLE "substrate_actor_activity" ("actorId" varchar(63) PRIMARY KEY NOT NULL, "connectionFingerprint" varchar(64) NOT NULL, "lastActivityAt" datetime(3) NOT NULL, "lastSuspendedAt" datetime(3), "autoStopMinutes" real NOT NULL, "autoDeleteMinutes" real NOT NULL, "ephemeral" boolean NOT NULL DEFAULT (false), "createdAt" datetime(3) NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')), "updatedAt" datetime(3) NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')), "suspensionClaimedAt" datetime(3), "activeCommandCount" integer NOT NULL DEFAULT (0), "activeCommandLeaseUntil" datetime(3), "revision" integer NOT NULL DEFAULT (0), "operationLeases" text NOT NULL DEFAULT ('{}'), "suspendAfter" datetime(3), "claimToken" varchar, "claimUntil" datetime(3))
 ```
 
 </details>
@@ -20,11 +20,16 @@ CREATE TABLE "substrate_actor_activity" ("actorId" varchar(63) PRIMARY KEY NOT N
 | actorId | varchar(63) |  | false |  |  |  |
 | autoDeleteMinutes | REAL |  | false |  |  |  |
 | autoStopMinutes | REAL |  | false |  |  |  |
+| claimToken | varchar |  | true |  |  |  |
+| claimUntil | datetime(3) |  | true |  |  |  |
 | connectionFingerprint | varchar(64) |  | false |  |  |  |
 | createdAt | datetime(3) | STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW') | false |  |  |  |
 | ephemeral | boolean | false | false |  |  |  |
 | lastActivityAt | datetime(3) |  | false |  |  |  |
 | lastSuspendedAt | datetime(3) |  | true |  |  |  |
+| operationLeases | TEXT | '{}' | false |  |  |  |
+| revision | INTEGER | 0 | false |  |  |  |
+| suspendAfter | datetime(3) |  | true |  |  |  |
 | suspensionClaimedAt | datetime(3) |  | true |  |  |  |
 | updatedAt | datetime(3) | STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW') | false |  |  |  |
 
@@ -54,11 +59,16 @@ erDiagram
   varchar_63_ actorId PK
   REAL autoDeleteMinutes
   REAL autoStopMinutes
+  varchar claimToken
+  datetime_3_ claimUntil
   varchar_64_ connectionFingerprint
   datetime_3_ createdAt
   boolean ephemeral
   datetime_3_ lastActivityAt
   datetime_3_ lastSuspendedAt
+  TEXT operationLeases
+  INTEGER revision
+  datetime_3_ suspendAfter
   datetime_3_ suspensionClaimedAt
   datetime_3_ updatedAt
 }

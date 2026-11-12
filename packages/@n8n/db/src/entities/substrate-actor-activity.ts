@@ -1,6 +1,6 @@
 import { Column, Entity, Index, PrimaryColumn } from '@n8n/typeorm';
 
-import { DateTimeColumn, dbType, WithTimestamps } from './abstract-entity';
+import { DateTimeColumn, JsonColumn, dbType, WithTimestamps } from './abstract-entity';
 
 const activityIntervalColumnType = dbType === 'postgresdb' ? 'float8' : 'float';
 
@@ -27,6 +27,21 @@ export class SubstrateActorActivity extends WithTimestamps {
 
 	@DateTimeColumn({ nullable: true })
 	activeCommandLeaseUntil: Date | null;
+
+	@Column({ type: 'int', default: 0 })
+	revision: number;
+
+	@JsonColumn({ default: () => "'{}'" })
+	operationLeases: Record<string, number>;
+
+	@DateTimeColumn({ nullable: true })
+	suspendAfter: Date | null;
+
+	@Column({ type: dbType === 'postgresdb' ? 'uuid' : 'varchar', nullable: true })
+	claimToken: string | null;
+
+	@DateTimeColumn({ nullable: true })
+	claimUntil: Date | null;
 
 	@Column({ type: activityIntervalColumnType })
 	autoStopMinutes: number;

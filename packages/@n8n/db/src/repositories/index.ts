@@ -99,7 +99,7 @@ export { ProcessedDataRepository } from './processed-data.repository';
 export { SettingsRepository } from './settings.repository';
 export {
 	SubstrateActorActivityRepository,
-	type SubstrateActorCommandCompletion,
+	type SubstrateActorActivityInput,
 	type SubstrateActorSuspensionClaim,
 } from './substrate-actor-activity.repository';
 export { TagRepository } from './tag.repository';
