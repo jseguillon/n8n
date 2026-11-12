@@ -15,7 +15,7 @@ import { z } from 'zod';
 
 import { BaseSandbox } from './base-sandbox';
 import { toShellCommand } from './shell-command';
-import { SubstrateControl, type SubstrateConnection } from './substrate-control';
+import { SubstrateControl, isSubstrateStatus, type SubstrateConnection } from './substrate-control';
 import type { SandboxFileClient, SubstrateOperationRecorder } from './types';
 import type { CommandResult, ExecuteCommandOptions } from '../types';
 
@@ -94,6 +94,9 @@ export interface SubstrateSandboxOptions extends SubstrateConnection {
 	onDestroyed?: (actorId: string) => Promise<void>;
 }
 
+/** A rejected POST is safe to retry only if the Actor itself is gone. */
+class SubstrateCommandNotStartedError extends SandboxServiceError {}
+
 /** Each n8n workspace has its own Actor. The router wakes suspended Actors. */
 export class SubstrateSandbox extends BaseSandbox {
 	readonly name = 'SubstrateSandbox';
@@ -104,6 +107,8 @@ export class SubstrateSandbox extends BaseSandbox {
 	private routerAgent?: Agent;
 	private routerAgentPromise?: Promise<Agent>;
 	private routerAgentFingerprint?: string;
+	private recoveryPromise?: Promise<void>;
+	private generation = 0;
 
 	constructor(private readonly options: SubstrateSandboxOptions) {
 		super();
@@ -127,6 +132,7 @@ export class SubstrateSandbox extends BaseSandbox {
 				await this.control.ensureActor(this.id);
 				await this.request('/healthz', { signal });
 			},
+			false,
 			false,
 		);
 	}
@@ -259,6 +265,8 @@ export class SubstrateSandbox extends BaseSandbox {
 			options?.abortSignal,
 			async (signal) =>
 				await this.executeCommandWithActivity(command, args, { ...options, abortSignal: signal }),
+			true,
+			'command',
 		);
 	}
 
@@ -267,6 +275,7 @@ export class SubstrateSandbox extends BaseSandbox {
 		abortSignal: AbortSignal | undefined,
 		operation: (signal: AbortSignal) => Promise<T>,
 		ensureRunning = true,
+		recovery: 'file' | 'command' | false = 'file',
 	): Promise<T> {
 		const recorder = this.options.onOperation;
 		const operationId = randomUUID();
@@ -292,13 +301,53 @@ export class SubstrateSandbox extends BaseSandbox {
 		heartbeat.unref();
 		try {
 			signal.throwIfAborted();
-			if (ensureRunning) await this.ensureRunning({ abortSignal: signal });
-			return await operation(signal);
+			const generation = this.generation;
+			const attempt = async () => {
+				if (ensureRunning) await this.ensureRunning({ abortSignal: signal });
+				return await operation(signal);
+			};
+			try {
+				return await attempt();
+			} catch (error) {
+				const rejected = error instanceof SandboxServiceError && error.status === 404;
+				const retryable =
+					recovery === 'file'
+						? rejected
+						: recovery === 'command' && error instanceof SubstrateCommandNotStartedError;
+				if (!retryable || signal.aborted) throw error;
+				const missing = generation !== this.generation || (await this.isActorMissing());
+				if (!missing && generation === this.generation) throw error;
+				await this.recoverActor(generation, signal);
+				return await attempt();
+			}
 		} finally {
 			clearInterval(heartbeat);
 			await heartbeatWork;
 			await recorder?.(this.id, operationId, 'finished', timeoutMs).catch(() => undefined);
 		}
+	}
+
+	private async isActorMissing(): Promise<boolean> {
+		try {
+			const probe = new SubstrateControl(this.options, Math.min(this.timeout, 10_000));
+			await probe.call('GetActor', this.id);
+			return false;
+		} catch (error) {
+			const { status } = await import('@grpc/grpc-js');
+			return isSubstrateStatus(error, status.NOT_FOUND);
+		}
+	}
+
+	private async recoverActor(generation: number, signal: AbortSignal): Promise<void> {
+		if (generation !== this.generation) return;
+		this.recoveryPromise ??= (async () => {
+			this.markNeedsStart();
+			await this.ensureRunning({ abortSignal: signal });
+			this.generation++;
+		})().finally(() => {
+			this.recoveryPromise = undefined;
+		});
+		await this.recoveryPromise;
 	}
 
 	private async executeCommandWithActivity(
@@ -419,6 +468,9 @@ export class SubstrateSandbox extends BaseSandbox {
 					execId = response.headers.get('x-exec-id') ?? execId;
 					break;
 				} catch (error) {
+					if (attempt === 0 && error instanceof SandboxServiceError && error.status === 404) {
+						throw new SubstrateCommandNotStartedError(error.message, error.status);
+					}
 					if (
 						signal.aborted ||
 						!isTransientExecutionRequestError(error) ||

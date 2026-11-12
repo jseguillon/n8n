@@ -680,40 +680,51 @@ describe('InstanceAiSandboxService', () => {
 			expect(setupSandboxWorkspace).toHaveBeenCalledTimes(1);
 		});
 
-		it('reruns workspace setup when the n8n sandbox lost its setup marker', async () => {
-			const { service } = createSandboxService({
-				config: {
-					sandboxEnabled: true,
-					sandboxProvider: 'n8n-sandbox',
-					n8nSandboxServiceUrl: 'https://env.sandbox',
-				},
-			});
-			const sandbox = { id: 'sandbox-1', provider: 'n8n-sandbox' };
-			const workspace = { init: vi.fn(async () => {}), destroy: vi.fn(async () => {}) };
-			(createSandbox as Mock).mockResolvedValue(sandbox);
-			(createWorkspace as Mock).mockReturnValue(workspace);
-			(setupSandboxWorkspace as Mock).mockResolvedValue(undefined);
-			(isSandboxWorkspaceInitialized as Mock).mockResolvedValue(true);
+		it.each(['n8n-sandbox', 'substrate'] as const)(
+			'reruns workspace setup when %s lost its setup marker',
+			async (provider) => {
+				const { service } = createSandboxService({
+					config: {
+						sandboxEnabled: true,
+						sandboxProvider: provider,
+						n8nSandboxServiceUrl: 'https://env.sandbox',
+						substrateEndpoint: 'api.example.test:443',
+						substrateRouterUrl: 'https://router.example.test',
+						substrateAtespace: 'sandboxes',
+						substrateTemplate: 'sandbox',
+						substrateTokenFile: '/run/test/token',
+						substrateCaFile: '/run/test/ca',
+						substrateRouterCredentialFile: '/run/test/router',
+						substrateServerName: 'api.example.test',
+					},
+				});
+				const sandbox = { id: 'sandbox-1', provider };
+				const workspace = { init: vi.fn(async () => {}), destroy: vi.fn(async () => {}) };
+				(createSandbox as Mock).mockResolvedValue(sandbox);
+				(createWorkspace as Mock).mockReturnValue(workspace);
+				(setupSandboxWorkspace as Mock).mockResolvedValue(undefined);
+				(isSandboxWorkspaceInitialized as Mock).mockResolvedValue(true);
 
-			const entry = await service.getOrCreateWorkspace(
-				'thread-1',
-				fakeUser,
-				{} as InstanceAiContext,
-			);
-			expect(isSandboxWorkspaceInitialized).not.toHaveBeenCalled();
-			await service.getOrCreateWorkspace('thread-1', fakeUser, {} as InstanceAiContext);
-			expect(isSandboxWorkspaceInitialized).toHaveBeenCalledWith(workspace);
-			expect(setupSandboxWorkspace).toHaveBeenCalledTimes(1);
+				const entry = await service.getOrCreateWorkspace(
+					'thread-1',
+					fakeUser,
+					{} as InstanceAiContext,
+				);
+				expect(isSandboxWorkspaceInitialized).not.toHaveBeenCalled();
+				await service.getOrCreateWorkspace('thread-1', fakeUser, {} as InstanceAiContext);
+				expect(isSandboxWorkspaceInitialized).toHaveBeenCalledWith(workspace);
+				expect(setupSandboxWorkspace).toHaveBeenCalledTimes(1);
 
-			entry?.verifiedBundles.set('skills', 'digest');
-			(isSandboxWorkspaceInitialized as Mock).mockResolvedValueOnce(false);
-			await service.getOrCreateWorkspace('thread-1', fakeUser, {} as InstanceAiContext);
+				entry?.verifiedBundles.set('skills', 'digest');
+				(isSandboxWorkspaceInitialized as Mock).mockResolvedValueOnce(false);
+				await service.getOrCreateWorkspace('thread-1', fakeUser, {} as InstanceAiContext);
 
-			expect(setupSandboxWorkspace).toHaveBeenCalledTimes(2);
-			expect(entry?.verifiedBundles.size).toBe(0);
-			await service.getOrCreateWorkspace('thread-1', fakeUser, {} as InstanceAiContext);
-			expect(setupSandboxWorkspace).toHaveBeenCalledTimes(2);
-		});
+				expect(setupSandboxWorkspace).toHaveBeenCalledTimes(2);
+				expect(entry?.verifiedBundles.size).toBe(0);
+				await service.getOrCreateWorkspace('thread-1', fakeUser, {} as InstanceAiContext);
+				expect(setupSandboxWorkspace).toHaveBeenCalledTimes(2);
+			},
+		);
 
 		it('does not check the setup marker for other providers', async () => {
 			const { service } = createSandboxService({

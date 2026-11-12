@@ -542,11 +542,10 @@ export class InstanceAiSandboxService {
 		context: InstanceAiContext,
 	): Promise<void> {
 		if (entry.setupComplete) {
-			// The n8n sandbox service can remove a sandbox while this entry is cached
-			// (idle reaping, runner restart), and the provider recreates it empty. The
-			// marker inside the sandbox is the only reliable record of setup.
+			// Recreated sandboxes start empty. Verify setup in the remote workspace,
+			// rather than trusting the cached entry after automatic deletion.
 			if (
-				entry.sandbox.provider !== 'n8n-sandbox' ||
+				!['n8n-sandbox', 'substrate'].includes(entry.sandbox.provider) ||
 				(await isSandboxWorkspaceInitialized(entry.workspace))
 			) {
 				return;

@@ -23,6 +23,180 @@ afterEach(() => {
 });
 
 describe('Substrate sandbox daemon protocol', () => {
+	const completedExecution = () =>
+		new Response(
+			[
+				JSON.stringify({ type: 'started', exec_id: 'fresh-command', seq: 0 }),
+				JSON.stringify({
+					type: 'exit',
+					exit_code: 0,
+					success: true,
+					execution_time_ms: 1,
+					timed_out: false,
+					killed: false,
+					seq: 1,
+				}),
+			].join('\n') + '\n',
+		);
+
+	it('recreates a deleted Actor through the same cached adapter before retrying a rejected command', async () => {
+		const ensureActor = vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
+		vi.spyOn(SubstrateControl.prototype, 'call').mockRejectedValue(
+			Object.assign(new Error('missing Actor'), { code: 5 }),
+		);
+		let posts = 0;
+		const fetch = vi.fn(async (_url: URL, init: RequestInit = {}) => {
+			if (init.method === 'POST')
+				return ++posts === 1
+					? new Response('missing Actor', { status: 404 })
+					: completedExecution();
+			return new Response('ok');
+		});
+		vi.stubGlobal('fetch', fetch);
+		const sandbox = new SubstrateSandbox(connection);
+		sandbox.status = 'running';
+
+		expect((await sandbox.executeCommand('printf', ['ok'])).exitCode).toBe(0);
+		expect(posts).toBe(2);
+		expect(ensureActor).toHaveBeenCalledOnce();
+		expect(sandbox.status).toBe('running');
+	});
+
+	it('shares one recreation between concurrent filesystem requests', async () => {
+		const ensureActor = vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
+		vi.spyOn(SubstrateControl.prototype, 'call').mockRejectedValue(
+			Object.assign(new Error('missing Actor'), { code: 5 }),
+		);
+		let writes = 0;
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (_url: URL, init: RequestInit = {}) =>
+				init.method === 'PUT' && ++writes <= 3
+					? new Response('missing Actor', { status: 404 })
+					: new Response('ok'),
+			),
+		);
+		const sandbox = new SubstrateSandbox(connection);
+		sandbox.status = 'running';
+
+		await Promise.all(
+			[1, 2, 3].map(async (id) => await sandbox.writeFile(sandbox.id, `/workspace/${id}`, 'fresh')),
+		);
+		expect(writes).toBe(6);
+		expect(ensureActor).toHaveBeenCalledOnce();
+	});
+
+	it('does not recreate an Actor for a missing file', async () => {
+		const ensureActor = vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
+		const probe = vi.spyOn(SubstrateControl.prototype, 'call').mockResolvedValue({});
+		const fetch = vi.fn().mockResolvedValue(new Response('missing file', { status: 404 }));
+		vi.stubGlobal('fetch', fetch);
+		const sandbox = new SubstrateSandbox(connection);
+		sandbox.status = 'running';
+
+		await expect(sandbox.readFile(sandbox.id, '/missing')).rejects.toMatchObject({ status: 404 });
+		expect(probe).toHaveBeenCalledWith('GetActor', sandbox.id);
+		expect(ensureActor).not.toHaveBeenCalled();
+		expect(fetch).toHaveBeenCalledOnce();
+	});
+
+	it.each([7, 14, 16])(
+		'does not recreate when the existence probe fails with gRPC code %i',
+		async (code) => {
+			const ensureActor = vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
+			vi.spyOn(SubstrateControl.prototype, 'call').mockRejectedValue(
+				Object.assign(new Error('probe failed'), { code }),
+			);
+			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('not found', { status: 404 })));
+			const sandbox = new SubstrateSandbox(connection);
+			sandbox.status = 'running';
+			await expect(sandbox.readFile(sandbox.id, '/workspace/file')).rejects.toMatchObject({
+				status: 404,
+			});
+			expect(ensureActor).not.toHaveBeenCalled();
+		},
+	);
+
+	it('bounds recovery to one recreation for a rejected command', async () => {
+		const ensureActor = vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
+		vi.spyOn(SubstrateControl.prototype, 'call').mockRejectedValue(
+			Object.assign(new Error('missing Actor'), { code: 5 }),
+		);
+		let posts = 0;
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (_url: URL, init: RequestInit = {}) => {
+				if (init.method === 'POST') {
+					posts++;
+					return new Response('not found', { status: 404 });
+				}
+				return new Response('ok');
+			}),
+		);
+		const sandbox = new SubstrateSandbox(connection);
+		sandbox.status = 'running';
+		await expect(sandbox.executeCommand('printf', ['once'])).rejects.toMatchObject({ status: 404 });
+		expect(posts).toBe(2);
+		expect(ensureActor).toHaveBeenCalledOnce();
+	});
+
+	it('never resubmits a started execution when replay returns not found', async () => {
+		const ensureActor = vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
+		const probe = vi
+			.spyOn(SubstrateControl.prototype, 'call')
+			.mockRejectedValue(Object.assign(new Error('missing Actor'), { code: 5 }));
+		let posts = 0;
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (_url: URL, init: RequestInit = {}) => {
+				if (init.method === 'POST') {
+					posts++;
+					return new Response('{"type":"started","exec_id":"started-command","seq":0}\n');
+				}
+				if (init.method === 'DELETE') return new Response('cancelled');
+				return new Response('missing execution', { status: 404 });
+			}),
+		);
+		const sandbox = new SubstrateSandbox(connection);
+		sandbox.status = 'running';
+
+		await expect(sandbox.executeCommand('touch', ['/workspace/once'])).rejects.toMatchObject({
+			status: 404,
+		});
+		expect(posts).toBe(1);
+		expect(ensureActor).not.toHaveBeenCalled();
+		expect(probe).not.toHaveBeenCalled();
+	});
+
+	it('does not recreate after an ambiguous submission followed by a not-found response', async () => {
+		const ensureActor = vi.spyOn(SubstrateControl.prototype, 'ensureActor').mockResolvedValue();
+		const probe = vi
+			.spyOn(SubstrateControl.prototype, 'call')
+			.mockRejectedValue(Object.assign(new Error('missing Actor'), { code: 5 }));
+		const ids: string[] = [];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (_url: URL, init: RequestInit = {}) => {
+				if (init.method === 'POST') {
+					if (typeof init.body !== 'string') throw new Error('Expected a JSON command body');
+					const body = JSON.parse(init.body) as { exec_id: string };
+					ids.push(body.exec_id);
+					return new Response('unavailable', { status: ids.length === 1 ? 503 : 404 });
+				}
+				return new Response('ok');
+			}),
+		);
+		const sandbox = new SubstrateSandbox(connection);
+		sandbox.status = 'running';
+		await expect(sandbox.executeCommand('touch', ['/workspace/once'])).rejects.toMatchObject({
+			status: 404,
+		});
+		expect(ids).toHaveLength(2);
+		expect(ids[0]).toBe(ids[1]);
+		expect(ensureActor).not.toHaveBeenCalled();
+		expect(probe).not.toHaveBeenCalled();
+	});
+
 	it('suspends persistent Actors and deletes ephemeral Actors on stop', async () => {
 		const controlCall = vi.spyOn(SubstrateControl.prototype, 'call').mockResolvedValue(undefined);
 		const deleteActor = vi.spyOn(SubstrateControl.prototype, 'deleteActor').mockResolvedValue();

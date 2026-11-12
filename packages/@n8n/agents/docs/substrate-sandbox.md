@@ -81,6 +81,14 @@ The command timeout still applies independently of the suspend behavior.
 If the execution stream disconnects, n8n resumes it by execution ID instead of
 starting the command again.
 
+If a cached adapter receives a not-found response, it checks the Actor through
+the Control API. A missing file does not recreate an existing Actor. When the
+Actor is gone, concurrent requests share one recreation and retry once. A command
+can retry this way only if its submission was rejected with HTTP 404. An accepted
+or started execution is never resubmitted because replay failed. A recreated
+Actor starts empty. Assistant checks the workspace initialization marker again
+and reruns setup before reusing its cached workspace.
+
 A cluster-leader task runs once per hour as a recovery check for Actors whose
 command-exit cleanup was missed, for example after an n8n restart. It uses the
 configured auto-stop interval and deletes suspended Actors after their retention
