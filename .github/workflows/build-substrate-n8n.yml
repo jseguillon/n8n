@@ -20,7 +20,7 @@ jobs:
       NODE_OPTIONS: '--max-old-space-size=7168'
       NODE_VERSION: '26.12.1'
       N8N_VERSION: branch-feat-substrate-ghcr-publish
-      N8N_RELEASE_TYPE: branch
+      N8N_RELEASE_TYPE: dev
       IMAGE_BASE_NAME: ghcr.io/${{ github.repository_owner }}/n8n
       IMAGE_TAG: branch-feat-substrate-ghcr-publish
       PLATFORMS: linux/amd64
