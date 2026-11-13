@@ -19,6 +19,7 @@ instance credential. Deployment settings remain with the server operator.
 | Private CA file and TLS server-name override | Server environment only | The operator owns the trust boundary |
 | Router client identity bundle | Server environment and mount only | Authenticates n8n to the router through mTLS |
 | Default Actor egress policy file | Server environment and mount only | Administrator-defined rules copied to Actors without a policy |
+| Provider rollout | PostHog flag or server environment override | Controls whether the Substrate provider appears in settings |
 | Kubernetes identity, worker images, and template definitions | Server operator | They are not sandbox connection fields |
 | Timeouts and lifecycle policy | Server operator | They control runtime behavior |
 
@@ -28,6 +29,11 @@ a boolean indicating whether the server supplies a renewable token, never that
 token's path or value.
 
 ## Configure through the UI
+
+The Substrate option is gated by PostHog flag `140_substrate_sandbox`. Create
+that flag disabled in Staging and Production before rollout. For local development
+and testing, set `N8N_SUBSTRATE_SANDBOX_ENABLED=true`. This operator override
+defaults to false and force-enables the flag for all users on the instance.
 
 1. Open **Settings > Agents > Shared sandbox > Add sandbox**.
 2. Select **Agent Substrate**.

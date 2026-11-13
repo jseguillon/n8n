@@ -15,6 +15,7 @@ import type { ModelConfig, SandboxConfig } from '@n8n/instance-ai';
 import { TELEMETRY_EVENT } from '@n8n/telemetry';
 import { ensureError } from '@n8n/utils/errors/ensure-error';
 import { sanitizeErrorDetail } from '@n8n/utils/redaction/sanitize-error-detail';
+import { NotFoundError } from '@n8n/errors';
 
 import { Telemetry } from '@/telemetry';
 import { createAiProxyFetch, createWebSearchFetch } from '@/utils/ai-proxy-fetch';
@@ -157,10 +158,13 @@ export class InstanceAiVerificationService {
 	}
 
 	async verifySandbox(
-		_user: User,
+		user: User,
 		request: InstanceAiVerifySandboxRequest,
 	): Promise<InstanceAiVerificationResponse> {
 		const provider = request.provider ?? this.globalConfig.instanceAi.sandboxProvider;
+		if (provider === 'substrate' && !(await this.settingsService.isSubstrateSandboxEnabled(user))) {
+			throw new NotFoundError('Not found');
+		}
 		let abortSignal: AbortSignal | undefined;
 		let raceWithAbort: typeof import('@n8n/agents').raceWithAbort | undefined;
 		let workspace:

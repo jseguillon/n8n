@@ -22,7 +22,7 @@ import {
 } from '@n8n/instance-ai';
 import type { ErrorReporter } from 'n8n-core';
 import { lowercaseUuidSchema } from '@n8n/api-types';
-import { OperationalError, UnexpectedError } from '@n8n/errors';
+import { NotFoundError, OperationalError, UnexpectedError } from '@n8n/errors';
 import { nanoid } from 'nanoid';
 import { v5 as uuidv5 } from 'uuid';
 
@@ -204,6 +204,7 @@ export type InstanceAiSandboxBackgroundTasks = {
 
 /** Settings collaborator that resolves provider credentials from admin config. */
 export type InstanceAiSandboxSettings = {
+	isSubstrateSandboxEnabled: (user?: User) => Promise<boolean>;
 	resolveSubstrateConfig?: () => Promise<
 		Extract<SandboxConfig, { provider: 'substrate'; enabled: true }>
 	>;
@@ -361,13 +362,17 @@ export class InstanceAiSandboxService {
 			normalizeSandboxProvider(this.instanceAiConfig.sandboxProvider) === 'substrate' &&
 			this.options.settingsService.resolveSubstrateConfig
 		) {
+			await this.assertSubstrateSandboxEnabled(user);
 			return this.withSubstrateActivity(
 				await this.options.settingsService.resolveSubstrateConfig(),
 			);
 		}
 		const base = this.getSandboxConfigFromEnv();
 		if (!base.enabled) return base;
-		if (base.provider === 'substrate') return base;
+		if (base.provider === 'substrate') {
+			await this.assertSubstrateSandboxEnabled(user);
+			return base;
+		}
 		if (base.provider === 'daytona') {
 			// If AI assistant service is available, route Daytona calls through its sandbox proxy
 			if (this.options.aiService.isProxyEnabled()) {
@@ -422,6 +427,12 @@ export class InstanceAiSandboxService {
 		};
 	}
 
+	private async assertSubstrateSandboxEnabled(user: User): Promise<void> {
+		if (!(await this.options.settingsService.isSubstrateSandboxEnabled(user))) {
+			throw new NotFoundError('Not found');
+		}
+	}
+
 	private withSubstrateActivity(config: SubstrateSandboxConfig): SubstrateSandboxConfig {
 		if (!this.options.onSubstrateOperation || config.ephemeral) return config;
 		const policy: SubstrateActorLifecyclePolicy = {
@@ -467,11 +478,7 @@ export class InstanceAiSandboxService {
 				if (existing) {
 					this.assertSandboxOwner(threadId, existing.userId, user);
 					if (existing.configFingerprint !== cacheState.fingerprint) {
-						this.evictSandboxEntry(
-							threadId,
-							existing,
-							'config_changed',
-						);
+						this.evictSandboxEntry(threadId, existing, 'config_changed');
 					} else if (this.isSandboxEntryExpired(existing) && !this.isSandboxInUse(threadId)) {
 						await this.evictIdleSandboxEntry(threadId, existing);
 					} else {

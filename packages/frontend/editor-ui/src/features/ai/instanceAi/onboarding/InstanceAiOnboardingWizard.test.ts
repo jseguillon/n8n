@@ -10,6 +10,16 @@ import { useInstanceAiSettingsStore } from '../instanceAiSettings.store';
 
 import InstanceAiOnboardingWizard from './InstanceAiOnboardingWizard.vue';
 
+const { posthogFeatureFlags } = vi.hoisted(() => ({
+	posthogFeatureFlags: { substrateSandbox: true },
+}));
+
+vi.mock('@/app/stores/posthog.store', () => ({
+	usePostHog: () => ({
+		isFeatureEnabled: () => posthogFeatureFlags.substrateSandbox,
+	}),
+}));
+
 vi.mock('@n8n/i18n', async (importOriginal) => ({
 	...(await importOriginal()),
 	useI18n: () => ({ baseText: (key: string) => key }),
@@ -98,7 +108,28 @@ function setupStore(overrides: Record<string, unknown> = {}) {
 describe('InstanceAiOnboardingWizard', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		posthogFeatureFlags.substrateSandbox = true;
 		vi.mocked(hasPermission).mockReturnValue(true);
+	});
+
+	it('hides Substrate until its rollout flag is enabled', async () => {
+		posthogFeatureFlags.substrateSandbox = false;
+		const { pinia } = setupStore();
+		const { findByTestId, queryByTestId } = renderWizard({ pinia, props: { step: 'sandbox' } });
+
+		expect(await findByTestId('assistant-sandbox-n8n-sandbox')).toBeVisible();
+		expect(queryByTestId('assistant-sandbox-substrate')).not.toBeInTheDocument();
+	});
+
+	it('shows Substrate when the operator environment override is enabled', async () => {
+		posthogFeatureFlags.substrateSandbox = false;
+		const { pinia } = setupStore();
+		useSettingsStore().$patch({
+			moduleSettings: { 'instance-ai': { substrateSandboxEnabled: true } },
+		});
+		const { findByTestId } = renderWizard({ pinia, props: { step: 'sandbox' } });
+
+		expect(await findByTestId('assistant-sandbox-substrate')).toBeVisible();
 	});
 
 	it('does not auto-focus or auto-open the model dropdown when the wizard opens', async () => {

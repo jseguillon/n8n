@@ -3,6 +3,7 @@ import {
 	ASSISTANT_SKILLS_FLAG,
 	CREDENTIAL_DESCRIPTIONS_FLAG,
 	INSTANCE_ACTIVITY_CONTEXT_FLAG,
+	SUBSTRATE_SANDBOX_FLAG,
 } from '@n8n/api-types';
 import { setN8nVersion } from '@n8n/backend-common';
 import { mockInstance } from '@n8n/backend-test-utils';
@@ -43,6 +44,7 @@ describe('PostHog', () => {
 
 	beforeEach(() => {
 		globalConfig.diagnostics.enabled = true;
+		globalConfig.instanceAi.substrateSandboxEnabled = false;
 		vi.resetAllMocks();
 	});
 
@@ -678,6 +680,18 @@ describe('PostHog', () => {
 					[ASSISTANT_SKILLS_FLAG]: false,
 					[AGENT_SANDBOX_FILES_FLAG]: false,
 					'101_agent_evals': true,
+				});
+			});
+
+			it('force-enables the Substrate sandbox flag when the operator opts in', async () => {
+				(PostHog.prototype.evaluateFlags as Mock).mockResolvedValue(mockEvaluatedFlags({}));
+				globalConfig.instanceAi.substrateSandboxEnabled = true;
+
+				const ph = new PostHogClient(instanceSettings, globalConfig);
+				await ph.init();
+
+				expect(await ph.getFeatureFlags({ id: userId, createdAt })).toMatchObject({
+					[SUBSTRATE_SANDBOX_FLAG]: true,
 				});
 			});
 

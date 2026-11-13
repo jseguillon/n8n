@@ -378,6 +378,7 @@ describe('GlobalConfig', () => {
 			midRunObservation: true,
 			sandboxEnabled: false,
 			sandboxProvider: 'n8n-sandbox',
+			substrateSandboxEnabled: false,
 			substrateEndpoint: '',
 			substrateRouterUrl: '',
 			substrateAtespace: '',

@@ -6,6 +6,7 @@ import type { InstanceSettings } from 'n8n-core';
 
 import type { KnowledgeConsumerScope } from '@/modules/knowledge/knowledge-consumer-scope';
 import type { SandboxSettingsService } from '@/services/sandbox-settings.service';
+import type { SubstrateActorLifecycleService } from '@/services/substrate-actor-lifecycle.service';
 
 import type { ProjectAgent } from '../entities/agent.entity';
 import {
@@ -124,6 +125,7 @@ describe('AgentKnowledgeSandboxProvider', () => {
 					mock<InstanceSettings>({ instanceId: 'instance-1' }),
 					agentRepository,
 					sandboxSettingsService,
+					mock<SubstrateActorLifecycleService>(),
 				),
 			);
 

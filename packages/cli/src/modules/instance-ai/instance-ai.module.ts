@@ -216,6 +216,7 @@ export class InstanceAiModule implements ModuleInterface {
 			cloudManaged: globalConfig.deployment.type === 'cloud',
 			setupCompleted,
 			sandboxEnabled: sandboxStatus.enabled,
+			substrateSandboxEnabled: globalConfig.instanceAi.substrateSandboxEnabled,
 			workflowBuilderAvailable: enabled && sandboxStatus.workflowBuilderAvailable,
 			sandboxUnavailableReason: sandboxStatus.unavailableReason,
 			runDebugEnabled: globalConfig.instanceAi.runDebugEnabled,

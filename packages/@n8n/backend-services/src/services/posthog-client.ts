@@ -12,6 +12,7 @@ import {
 	GROUPS_WITH_MANY_BOUNDARIES_FLAG,
 	INSTANCE_AI_FOLDER_EXPLORATION_ENABLED_VARIANT,
 	INSTANCE_AI_FOLDER_EXPLORATION_FLAG,
+	SUBSTRATE_SANDBOX_FLAG,
 } from '@n8n/api-types';
 import { getN8nVersion } from '@n8n/backend-common';
 import { GlobalConfig } from '@n8n/config';
@@ -296,6 +297,10 @@ export class PostHogClient {
 		if (this.globalConfig.instanceAi.folderExplorationEnabled) {
 			overrides[INSTANCE_AI_FOLDER_EXPLORATION_FLAG] =
 				INSTANCE_AI_FOLDER_EXPLORATION_ENABLED_VARIANT;
+		}
+
+		if (this.globalConfig.instanceAi.substrateSandboxEnabled) {
+			overrides[SUBSTRATE_SANDBOX_FLAG] = true;
 		}
 
 		if (this.globalConfig.workflows.groupsWithTriggersEnabled) {

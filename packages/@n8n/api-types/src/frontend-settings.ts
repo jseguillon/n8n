@@ -406,6 +406,8 @@ export type FrontendModuleSettings = {
 		/** Whether model, sandbox, and the explicit web-search decision are configured. */
 		setupCompleted?: boolean;
 		sandboxEnabled: boolean;
+		/** Operator override (`N8N_SUBSTRATE_SANDBOX_ENABLED`) for the Substrate provider flag. */
+		substrateSandboxEnabled?: boolean;
 		workflowBuilderAvailable: boolean;
 		sandboxUnavailableReason: string | null;
 		/** When true, orchestrator LLM step / workflow code debug is captured (`N8N_INSTANCE_AI_RUN_DEBUG_ENABLED`). */

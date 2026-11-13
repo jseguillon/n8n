@@ -71,6 +71,7 @@ describe('InstanceAiVerificationService', () => {
 			daytonaApiKey: 'env-daytona-key',
 		});
 		modelService.resolveAgentModelConfig.mockResolvedValue('openai/saved-model');
+		settingsService.isSubstrateSandboxEnabled.mockResolvedValue(true);
 		createModelMock.mockReturnValue({} as never);
 		generateTextMock.mockResolvedValue({} as never);
 		service = new InstanceAiVerificationService(
@@ -81,6 +82,14 @@ describe('InstanceAiVerificationService', () => {
 			outboundHttp,
 			telemetry,
 		);
+	});
+
+	it('does not verify Substrate when the rollout flag is off', async () => {
+		settingsService.isSubstrateSandboxEnabled.mockResolvedValue(false);
+		await expect(service.verifySandbox(user, { provider: 'substrate' })).rejects.toThrow(
+			'Not found',
+		);
+		expect(createSandboxMock).not.toHaveBeenCalled();
 	});
 
 	afterEach(() => {

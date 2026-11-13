@@ -10,7 +10,6 @@ import type { AgentsConfig, DeploymentConfig, InstanceAiConfig } from '@n8n/conf
 import type { OperationContext } from '@n8n/db';
 import { Service } from '@n8n/di';
 import { ensureError } from '@n8n/utils/errors/ensure-error';
-import type { ICredentialDataDecryptedObject } from 'n8n-workflow';
 import { nanoid } from 'nanoid';
 
 import {

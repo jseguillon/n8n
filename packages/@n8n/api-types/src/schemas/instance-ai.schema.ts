@@ -2864,6 +2864,9 @@ export interface InstanceAiEvalMockedCredential {
  */
 export const EVAL_VENDOR_SDK_INTERCEPTION_FLAG = '085_eval_vendor_sdk_interception';
 
+/** Enables the Agent Substrate sandbox provider in Agent and Assistant settings. */
+export const SUBSTRATE_SANDBOX_FLAG = '140_substrate_sandbox';
+
 /** The config-evaluations experiment that surfaces/runs config evals in the UI.
  *  Instance AI's config-based eval tool + skill are gated on it so it can't
  *  create evals the user has no UI to run. Mirrors the editor-ui wizard. */

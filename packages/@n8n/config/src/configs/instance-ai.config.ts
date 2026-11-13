@@ -161,6 +161,10 @@ export class InstanceAiConfig {
 	@Env('N8N_INSTANCE_AI_SANDBOX_PROVIDER')
 	sandboxProvider: string = 'n8n-sandbox';
 
+	/** Whether you can configure Agent Substrate as a sandbox provider. Set this to true to enable the provider on this instance for development and testing. */
+	@Env('N8N_SUBSTRATE_SANDBOX_ENABLED')
+	substrateSandboxEnabled: boolean = false;
+
 	/** Substrate control API endpoint in host:port format. Leave unset to use a saved sandbox connection. */
 	@Env('SUBSTRATE_API_ENDPOINT')
 	substrateEndpoint: string = '';

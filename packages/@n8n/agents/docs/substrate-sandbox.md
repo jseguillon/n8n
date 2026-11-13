@@ -42,6 +42,12 @@ Leave `N8N_INSTANCE_AI_SANDBOX_PROVIDER` unset to select **Agent Substrate** in
 **Agents → Add a code sandbox**. The dialog verifies a workspace and saves the
 provider selection. It does not send the server token or CA to the browser.
 
+The provider is behind the `140_substrate_sandbox` rollout flag. Create the flag
+disabled in Staging and Production before rollout. Set
+`N8N_SUBSTRATE_SANDBOX_ENABLED=true` to force-enable it on a development or test
+instance. The variable defaults to false and does not configure a Substrate
+connection.
+
 For server-managed configuration, set
 `N8N_INSTANCE_AI_SANDBOX_PROVIDER=substrate` and
 `N8N_INSTANCE_AI_SANDBOX_ENABLED=true`. The UI then shows a server-managed
@@ -149,10 +155,18 @@ The file contains rules, without resource metadata:
 ```
 
 This example permits npm registry TLS traffic on port 443. Add only the hosts
-and ports your sandbox workloads need. This integration accepts TLS passthrough
-rules with explicit hostname and port lists. It rejects unsupported rule types
-and fields instead of silently dropping them. An empty rules list permits no
-outbound destinations.
+and ports your sandbox workloads need. This integration accepts HTTP and TLS
+passthrough rules with hostname lists and either `ports.numbers` (up to 16 port
+numbers) or `ports.all: {}`. A hostname of `*` matches every hostname. The loader
+rejects unsupported rule types and fields instead of silently dropping them.
+An empty rules list permits no outbound destinations.
+
+For broad web access, use an HTTP rule for `*` on port 80 and a TLS passthrough
+rule for `*` with `ports.all: {}`. The explicit HTTP port takes precedence.
+Substrate rejects an HTTP and TLS rule with the same hostname pattern when both
+select all ports. Substrate v1 policies do not allow arbitrary TCP, UDP,
+TLS without SNI, STARTTLS, or server-first protocols. Cleartext HTTP on other
+ports needs an explicit HTTP rule.
 
 n8n reads and validates the file before Actor acquisition. It copies the rules
 into an Actor's `default` policy before resume when that Actor has no policy.

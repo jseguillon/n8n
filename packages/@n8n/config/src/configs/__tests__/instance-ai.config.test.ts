@@ -50,3 +50,19 @@ describe('InstanceAiConfig concurrency caps', () => {
 		);
 	});
 });
+
+describe('InstanceAiConfig Substrate opt-in', () => {
+	beforeEach(() => {
+		Container.reset();
+		vi.unstubAllEnvs();
+	});
+
+	it('defaults off', () => {
+		expect(Container.get(GlobalConfig).instanceAi.substrateSandboxEnabled).toBe(false);
+	});
+
+	it('accepts the operator opt-in environment variable', () => {
+		vi.stubEnv('N8N_SUBSTRATE_SANDBOX_ENABLED', 'true');
+		expect(Container.get(GlobalConfig).instanceAi.substrateSandboxEnabled).toBe(true);
+	});
+});

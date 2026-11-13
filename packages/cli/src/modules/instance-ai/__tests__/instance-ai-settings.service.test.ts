@@ -1,8 +1,13 @@
 import { DEFAULT_INSTANCE_AI_PERMISSIONS } from '@n8n/api-types';
 import type { InstanceAiPermissions } from '@n8n/api-types';
 import { Logger } from '@n8n/backend-common';
-import { type EventService, type CredentialsFinderService } from '@n8n/backend-services';
+import {
+	type EventService,
+	type CredentialsFinderService,
+	type PostHogClient,
+} from '@n8n/backend-services';
 import type { InstanceAiConfig } from '@n8n/config';
+import { SUBSTRATE_SANDBOX_FLAG } from '@n8n/api-types';
 import { Person } from '@n8n/db';
 import type { CredentialsEntity, DbLockService, SettingsRepository, User } from '@n8n/db';
 import { Container } from '@n8n/di';
@@ -61,6 +66,7 @@ describe('InstanceAiSettingsService', () => {
 	const instanceCredentialBroker = mock<InstanceCredentialBroker>();
 	const sandboxSettingsService = mock<SandboxSettingsService>();
 	const eventService = mock<EventService>();
+	const postHogClient = mock<PostHogClient>();
 	const license = mock<License>();
 	const threadRepository = mock<InstanceAiThreadRepository>();
 	const logger = mock<Logger>();
@@ -78,6 +84,7 @@ describe('InstanceAiSettingsService', () => {
 			instanceCredentialBroker,
 			sandboxSettingsService,
 			eventService,
+			postHogClient,
 			license,
 			threadRepository,
 		);
@@ -135,6 +142,7 @@ describe('InstanceAiSettingsService', () => {
 			n8nSandboxServiceApiKey: '',
 			mcpServers: '',
 			browserMcp: false,
+			substrateSandboxEnabled: false,
 			braveSearchApiKey: '',
 			searxngUrl: '',
 			daytonaApiUrl: '',
@@ -157,6 +165,7 @@ describe('InstanceAiSettingsService', () => {
 		threadRepository.exists.mockResolvedValue(false);
 		instanceCredentialBroker.listForUse.mockResolvedValue([]);
 		instanceCredentialBroker.getAssignedCredentialId.mockResolvedValue(null);
+		postHogClient.getFeatureFlags.mockResolvedValue({ [SUBSTRATE_SANDBOX_FLAG]: true });
 		sandboxSettingsService.getProvider.mockImplementation(() =>
 			globalConfig.instanceAi.sandboxProvider === 'daytona' ? 'daytona' : 'n8n-sandbox',
 		);
@@ -190,6 +199,17 @@ describe('InstanceAiSettingsService', () => {
 			return await fn(operationContext);
 		});
 		service = createService();
+	});
+
+	it('does not allow selecting Substrate when its rollout flag is off', async () => {
+		postHogClient.getFeatureFlags.mockResolvedValue({});
+		await expect(
+			service.updateAdminSettings(
+				{ sandboxConnection: { type: 'substrateApi', data: {} } },
+				mock<User>(),
+			),
+		).rejects.toThrow('Not found');
+		expect(credentialsService.createInstanceCredential).not.toHaveBeenCalled();
 	});
 
 	afterEach(() => {

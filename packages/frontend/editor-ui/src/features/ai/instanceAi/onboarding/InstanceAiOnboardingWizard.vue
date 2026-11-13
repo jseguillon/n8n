@@ -6,6 +6,7 @@ import type {
 	InstanceAiVerificationFailure,
 	InstanceAiVerificationResponse,
 } from '@n8n/api-types';
+import { SUBSTRATE_SANDBOX_FLAG } from '@n8n/api-types';
 import {
 	N8nBadge,
 	N8nButton,
@@ -27,7 +28,9 @@ import {
 } from '@n8n/design-system';
 import { type BaseTextKey, useI18n } from '@n8n/i18n';
 import { TIME } from '@/app/constants/durations';
+import { usePostHog } from '@/app/stores/posthog.store';
 import { useCredentialsStore } from '@/features/credentials/credentials.store';
+import { useSettingsStore } from '@n8n/stores/settings.store';
 import { SANDBOX_PROVIDER_LABELS } from '../constants';
 import { useInstanceCredentialTest } from '../composables/useInstanceCredentialTest';
 import {
@@ -94,6 +97,8 @@ const emit = defineEmits<{
 const i18n = useI18n();
 const store = useInstanceAiSettingsStore();
 const credentialsStore = useCredentialsStore();
+const settingsStore = useSettingsStore();
+const postHog = usePostHog();
 const { credentialTestError, testSavedCredential } = useInstanceCredentialTest();
 
 const busy = ref(false);
@@ -160,11 +165,20 @@ const modelOptions = computed(() =>
 		: getInstanceAiModelOptions(modelProvider.value, store.modelCatalog, modelName.value),
 );
 const sandboxEnvManaged = computed(() => store.settings?.sandboxEnvConfigured === true);
+const substrateSandboxAvailable = computed(
+	() =>
+		settingsStore.moduleSettings?.['instance-ai']?.substrateSandboxEnabled === true ||
+		postHog.isFeatureEnabled(SUBSTRATE_SANDBOX_FLAG) === true,
+);
 const searchEnvManaged = computed(() => store.settings?.searchEnvConfigured === true);
 const readOnly = computed(() => !store.canManageInstanceCredentials);
 const sandboxProviders = computed(() =>
 	INSTANCE_AI_SANDBOX_PROVIDERS.filter(
-		(provider) => !store.isProxyEnabled || provider.id !== 'substrate',
+		(provider) =>
+			(provider.id !== 'substrate' ||
+				substrateSandboxAvailable.value ||
+				store.settings?.sandboxProvider === 'substrate') &&
+			(!store.isProxyEnabled || provider.id !== 'substrate'),
 	),
 );
 const isProxyDaytonaSelection = computed(
@@ -209,6 +223,9 @@ const allCompatibleCredentials = computed(() => {
 	return credentials.filter(
 		(credential) =>
 			allowedTypes.has(credential.type) &&
+			(credential.type !== 'substrateApi' ||
+				substrateSandboxAvailable.value ||
+				store.settings?.sandboxProvider === 'substrate') &&
 			!(props.step === 'sandbox' && store.isProxyEnabled && credential.type === 'substrateApi'),
 	);
 });

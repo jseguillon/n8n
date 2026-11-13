@@ -78,6 +78,7 @@ function createSandboxService(overrides: Overrides = {}) {
 		...overrides.backgroundTasks,
 	};
 	const settingsService: InstanceAiSandboxSettings = {
+		isSubstrateSandboxEnabled: vi.fn(async () => true),
 		resolveDaytonaConfig: vi.fn(async () => ({ apiKey: 'test-daytona-key' })),
 		resolveN8nSandboxConfig: vi.fn(async () => ({})),
 		...overrides.settingsService,
@@ -152,6 +153,27 @@ describe('InstanceAiSandboxService', () => {
 				'started',
 				600_000,
 			);
+		});
+
+		it('refuses Substrate workspace acquisition when the rollout flag is off', async () => {
+			const { service, settingsService } = createSandboxService({
+				config: {
+					sandboxEnabled: true,
+					sandboxProvider: 'substrate',
+					substrateEndpoint: 'api.ate-system.svc:443',
+					substrateRouterUrl: 'https://router.example',
+					substrateAtespace: 'n8n',
+					substrateTemplate: 'sandbox',
+					substrateTokenFile: '/run/secrets/token',
+					substrateCaFile: '/run/secrets/ca.crt',
+					substrateRouterCredentialFile: '/run/secrets/router-credential-bundle.pem',
+					substrateServerName: 'api.ate-system.svc',
+				},
+			});
+			vi.mocked(settingsService.isSubstrateSandboxEnabled).mockResolvedValue(false);
+
+			await expect(service.resolveSandboxConfig(fakeUser)).rejects.toThrow('Not found');
+			expect(createSandbox).not.toHaveBeenCalled();
 		});
 
 		it('returns a disabled config when sandboxes are not enabled', async () => {

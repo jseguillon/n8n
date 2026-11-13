@@ -1,5 +1,5 @@
 import { isOpenAiCustomEndpoint } from '@n8n/ai-utilities/model-discovery';
-import { EventService, CredentialsFinderService } from '@n8n/backend-services';
+import { EventService, CredentialsFinderService, PostHogClient } from '@n8n/backend-services';
 import { isDeepStrictEqual } from 'node:util';
 
 import {
@@ -7,6 +7,7 @@ import {
 	deriveInstanceAiSetupState,
 	INSTANCE_AI_MODEL_CREDENTIAL_TYPES,
 	INSTANCE_AI_SEARCH_CREDENTIAL_TYPES,
+	SUBSTRATE_SANDBOX_FLAG,
 	resolveInstanceAiPermissions,
 } from '@n8n/api-types';
 import type {
@@ -45,6 +46,7 @@ import {
 import {
 	ConflictError,
 	ForbiddenError,
+	NotFoundError,
 	UnprocessableRequestError,
 	UnexpectedError,
 } from '@n8n/errors';
@@ -320,6 +322,7 @@ export class InstanceAiSettingsService {
 		private readonly instanceCredentialBroker: InstanceCredentialBroker,
 		private readonly sandboxSettingsService: SandboxSettingsService,
 		private readonly eventService: EventService,
+		private readonly postHogClient: PostHogClient,
 		private readonly license: License,
 		private readonly threadRepository: InstanceAiThreadRepository,
 	) {
@@ -327,6 +330,13 @@ export class InstanceAiSettingsService {
 		this.deploymentConfig = globalConfig.deployment;
 		this.environmentSandboxProvider = this.sandboxSettingsService.getProvider();
 		this.environmentN8nSandboxServiceUrl = this.config.n8nSandboxServiceUrl;
+	}
+
+	async isSubstrateSandboxEnabled(user?: User): Promise<boolean> {
+		if (this.config.substrateSandboxEnabled) return true;
+		if (!user) return false;
+		const flags = await this.postHogClient.getFeatureFlags(user);
+		return flags?.[SUBSTRATE_SANDBOX_FLAG] === true;
 	}
 
 	/** Whether this instance is running on the cloud platform. */
@@ -533,6 +543,13 @@ export class InstanceAiSettingsService {
 		user?: User,
 	): Promise<InstanceAiAdminSettingsResponse> {
 		this.rejectEnvironmentManagedFields(update);
+		const selectsSubstrate =
+			update.sandboxProvider === 'substrate' ||
+			update.sandboxConnection?.type === 'substrateApi' ||
+			typeof update.substrateCredentialId === 'string';
+		if (selectsSubstrate && !(await this.isSubstrateSandboxEnabled(user))) {
+			throw new NotFoundError('Not found');
+		}
 		this.rejectManagedFields(
 			update,
 			InstanceAiSettingsService.MANAGED_ADMIN_FIELDS,
