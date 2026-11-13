@@ -1063,6 +1063,7 @@ describe('InstanceAiService — runtime workspace setup', () => {
 			},
 			backgroundTasks: { getRunningTasks: vi.fn(() => []) },
 			settingsService: {
+				isSubstrateSandboxEnabled: vi.fn(async () => true),
 				resolveDaytonaConfig: vi.fn(async () => ({ apiKey: 'test-daytona-key' })),
 				resolveN8nSandboxConfig: vi.fn(async () => ({})),
 			},
@@ -1412,6 +1413,7 @@ describe('InstanceAiService — runtime workspace setup', () => {
 			},
 			backgroundTasks: { getRunningTasks: vi.fn(() => []) },
 			settingsService: {
+				isSubstrateSandboxEnabled: vi.fn(async () => true),
 				resolveDaytonaConfig: vi.fn(async () => ({ apiKey: 'test-daytona-key' })),
 				resolveN8nSandboxConfig: vi.fn(async () => ({})),
 			},
