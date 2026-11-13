@@ -13,7 +13,42 @@ export interface SubstrateConnection {
 	caFile: string;
 	routerCredentialFile?: string;
 	serverName: string;
+	/** Server-owned JSON policy copied to Actors that have no policy. */
+	egressPolicyFile?: string;
 }
+
+const egressPolicySchema = z
+	.object({
+		rules: z
+			.array(
+				z
+					.object({
+						tlsPassthrough: z
+							.object({
+								hostnames: z
+									.array(
+										z
+											.string()
+											.trim()
+											.min(1)
+											.max(253)
+											.regex(/^[a-zA-Z0-9.*-]+$/),
+									)
+									.min(1)
+									.max(256),
+								ports: z
+									.object({ numbers: z.array(z.number().int().min(1).max(65535)).min(1).max(256) })
+									.strict(),
+							})
+							.strict(),
+					})
+					.strict(),
+			)
+			.max(256),
+	})
+	.strict();
+
+export type SubstrateEgressPolicy = z.infer<typeof egressPolicySchema>;
 
 // Wire-compatible subset of the Substrate v1 Control API (Apache-2.0).
 // https://github.com/agent-substrate/substrate/blob/v1.0.0/api/ateapi/v1/ateapi.proto
@@ -66,7 +101,10 @@ export class SubstrateControl {
 			| 'DeleteActor'
 			| 'CreateActorEgressPolicy',
 		name: string,
+		egressPolicy?: SubstrateEgressPolicy,
 	): Promise<unknown> {
+		if (method === 'CreateActorEgressPolicy' && !egressPolicy)
+			throw new Error('A configured Substrate egress policy is required');
 		const [{ Client, credentials, Metadata }, protobufjs] = await Promise.all([
 			import('@grpc/grpc-js'),
 			import('protobufjs'),
@@ -110,14 +148,7 @@ export class SubstrateControl {
 							actor: ref,
 							egressPolicy: {
 								metadata: { atespace: c.atespace, name: 'default' },
-								rules: [
-									{
-										tlsPassthrough: {
-											hostnames: ['registry.npmjs.org'],
-											ports: { numbers: [443] },
-										},
-									},
-								],
+								rules: egressPolicy?.rules,
 							},
 						}
 					: method === 'SuspendActor'
@@ -147,6 +178,7 @@ export class SubstrateControl {
 
 	async ensureActor(name: string): Promise<void> {
 		const { status } = await import('@grpc/grpc-js');
+		const policy = await this.readDefaultEgressPolicy();
 		try {
 			await this.call('CreateActor', name);
 		} catch (error) {
@@ -159,12 +191,30 @@ export class SubstrateControl {
 		) {
 			throw new Error('The existing Actor uses a different Substrate template');
 		}
-		try {
-			await this.call('CreateActorEgressPolicy', name);
-		} catch (error) {
-			if (!isSubstrateStatus(error, status.ALREADY_EXISTS)) throw error;
+		if (policy) {
+			try {
+				await this.call('CreateActorEgressPolicy', name, policy);
+			} catch (error) {
+				// An Actor's existing policy remains authoritative.
+				if (!isSubstrateStatus(error, status.ALREADY_EXISTS)) throw error;
+			}
 		}
 		await this.call('ResumeActor', name);
+	}
+
+	private async readDefaultEgressPolicy(): Promise<SubstrateEgressPolicy | undefined> {
+		if (!this.connection.egressPolicyFile) return undefined;
+		const contents = await readFile(this.connection.egressPolicyFile, 'utf8').catch(() => {
+			throw new Error('The server Substrate egress policy file could not be read');
+		});
+		try {
+			if (Buffer.byteLength(contents) > 1024 * 1024) throw new Error('Policy is too large');
+			return egressPolicySchema.parse(JSON.parse(contents));
+		} catch {
+			throw new Error(
+				'The server Substrate egress policy file is invalid; use supported TLS passthrough rules',
+			);
+		}
 	}
 
 	async deleteActor(name: string): Promise<void> {

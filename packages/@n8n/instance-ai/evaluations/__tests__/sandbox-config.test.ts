@@ -9,6 +9,27 @@ const baseEnv = (extras: Record<string, string | undefined> = {}): NodeJS.Proces
 };
 
 describe('resolveSandboxConfig', () => {
+	it.each([undefined, '/run/config/egress.json'])(
+		'forwards the optional Substrate egress policy file %s',
+		(egressPolicyFile) => {
+			const config = resolveSandboxConfig(
+				baseEnv({
+					N8N_INSTANCE_AI_SANDBOX_PROVIDER: 'substrate',
+					SUBSTRATE_API_ENDPOINT: 'api.example.test:443',
+					SUBSTRATE_ROUTER_URL: 'https://router.example.test',
+					SUBSTRATE_ATESPACE: 'sandboxes',
+					SUBSTRATE_ACTOR_TEMPLATE: 'sandbox',
+					SUBSTRATE_TOKEN_FILE: '/run/test/token',
+					SUBSTRATE_CA_FILE: '/run/test/ca',
+					SUBSTRATE_ROUTER_CREDENTIAL_FILE: '/run/test/router',
+					SUBSTRATE_EGRESS_POLICY_FILE: egressPolicyFile,
+				}),
+			);
+			expect(config.provider).toBe('substrate');
+			if (config.enabled && config.provider === 'substrate')
+				expect(config.connection.egressPolicyFile).toBe(egressPolicyFile);
+		},
+	);
 	it('returns an n8n-sandbox config by default when serviceUrl is set', () => {
 		const env = baseEnv({
 			N8N_SANDBOX_SERVICE_URL: 'https://sandbox.example.com',

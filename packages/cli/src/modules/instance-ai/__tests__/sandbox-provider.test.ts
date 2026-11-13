@@ -81,5 +81,15 @@ describe('sandbox-provider', () => {
 				substrateSandboxConfig({ ...config, substrateTokenFile: value } as never),
 			).toThrow(OperationalError);
 		});
+
+		it('forwards an optional server-owned egress policy without making it a connection prerequisite', () => {
+			expect(
+				substrateSandboxConfig({
+					...config,
+					substrateEgressPolicyFile: '/run/config/egress.json',
+				} as never),
+			).toMatchObject({ connection: { egressPolicyFile: '/run/config/egress.json' } });
+			expect(substrateSandboxConfig(config as never)).toMatchObject({ provider: 'substrate' });
+		});
 	});
 });

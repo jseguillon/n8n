@@ -91,10 +91,17 @@ export const INSTANCE_AI_N8N_SANDBOX_CREDENTIAL_POLICY: InstanceCredentialUse = 
 /** Connection fields belong to the instance credential; TLS and token files stay server-owned. */
 export function parseSubstrateCredential({ type, data }: SandboxCredential) {
 	if (
-		['tokenFile', 'caFile', 'routerCredentialFile', 'serverName'].some((field) => field in data)
+		[
+			'tokenFile',
+			'caFile',
+			'routerCredentialFile',
+			'serverName',
+			'egressPolicyFile',
+			'egressPolicy',
+		].some((field) => field in data)
 	) {
 		throw new UnprocessableRequestError(
-			'Substrate TLS trust, router identity and token files are managed on the server',
+			'Substrate TLS trust, router identity, token files and egress policies are managed on the server',
 		);
 	}
 	if (data.apiToken !== undefined && typeof data.apiToken !== 'string') {
@@ -214,6 +221,9 @@ export class SandboxSettingsService {
 				serverName:
 					process.env.SUBSTRATE_SERVER_NAME?.trim() ||
 					parsed.endpoint.replace(/:\d+$/, '').replace(/^\[|\]$/g, ''),
+				...(this.config.substrateEgressPolicyFile
+					? { egressPolicyFile: this.config.substrateEgressPolicyFile }
+					: {}),
 			},
 			timeout: this.config.sandboxTimeout,
 			ephemeral: this.config.sandboxEphemeral,

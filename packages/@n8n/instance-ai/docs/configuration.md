@@ -89,6 +89,7 @@ without search results. `research(action="fetch-url")` still works.
 | `DAYTONA_API_KEY` | string | `''` | Daytona API key for authentication. Required when provider is `daytona`. |
 | `N8N_SANDBOX_SERVICE_URL` | string | `''` | n8n sandbox service URL. Required when provider is `n8n-sandbox`. |
 | `N8N_SANDBOX_SERVICE_API_KEY` | string | `''` | API key for the n8n sandbox service. Optional when an `httpHeaderAuth` credential is selected in admin settings. |
+| `SUBSTRATE_EGRESS_POLICY_FILE` | string | `''` | Server-owned JSON default egress policy. n8n copies its rules to Substrate Actors without a policy. Unset means n8n creates no egress policies. See the [policy guide](../../agents/docs/substrate-sandbox.md#default-egress-policy). |
 | `N8N_INSTANCE_AI_SANDBOX_IMAGE` | string | `daytonaio/sandbox:0.5.0` | Docker image for the Daytona sandbox. |
 | `N8N_INSTANCE_AI_SANDBOX_SNAPSHOT` | string | `''` | Overrides the full Daytona snapshot name (e.g. `n8n/instance-ai:2.27.3`) used to create sandboxes. Defaults to the versioned snapshot derived from the running n8n version. It applies only in proxy mode. A missing or unusable snapshot fails sandbox creation because proxy mode cannot upload an image-build context. |
 | `N8N_INSTANCE_AI_SANDBOX_TIMEOUT` | number | `300000` | Default command timeout in the sandbox (milliseconds). |

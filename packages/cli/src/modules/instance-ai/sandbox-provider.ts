@@ -23,7 +23,12 @@ export function substrateSandboxConfig(config: InstanceAiConfig): SubstrateSandb
 	return {
 		enabled: true,
 		provider: 'substrate',
-		connection,
+		connection: {
+			...connection,
+			...(config.substrateEgressPolicyFile
+				? { egressPolicyFile: config.substrateEgressPolicyFile }
+				: {}),
+		},
 		timeout: config.sandboxTimeout,
 		ephemeral: config.sandboxEphemeral,
 	};

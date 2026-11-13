@@ -193,6 +193,10 @@ export class InstanceAiConfig {
 	@Env('SUBSTRATE_SERVER_NAME')
 	substrateServerName: string = 'api.ate-system.svc';
 
+	/** Path to a JSON file containing default Substrate Actor egress rules. n8n copies these rules to Actors without an existing policy. When unset, n8n doesn't create egress policies. */
+	@Env('SUBSTRATE_EGRESS_POLICY_FILE')
+	substrateEgressPolicyFile: string = '';
+
 	/** Daytona API URL (e.g. "http://localhost:3000/api"). */
 	@Env('DAYTONA_API_URL')
 	daytonaApiUrl: string = '';

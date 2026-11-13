@@ -386,6 +386,7 @@ describe('GlobalConfig', () => {
 			substrateCaFile: '',
 			substrateRouterCredentialFile: '',
 			substrateServerName: 'api.ate-system.svc',
+			substrateEgressPolicyFile: '',
 			sandboxImage: 'daytonaio/sandbox:0.5.0',
 			sandboxSnapshot: '',
 			daytonaApiUrl: '',

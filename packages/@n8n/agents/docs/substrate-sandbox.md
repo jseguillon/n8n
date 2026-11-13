@@ -27,6 +27,7 @@ Set these server environment variables:
 | `SUBSTRATE_CA_FILE` | Path to the control API CA bundle |
 | `SUBSTRATE_ROUTER_CREDENTIAL_FILE` | Path to a mounted PodIdentity PEM bundle for router mTLS |
 | `SUBSTRATE_SERVER_NAME` | TLS server name; defaults to `api.ate-system.svc` |
+| `SUBSTRATE_EGRESS_POLICY_FILE` | Optional server-owned JSON file with default Actor egress rules |
 
 Mount the token and CA files read-only. The n8n user must be able to read them.
 Mount a projected PodIdentity credential bundle for the n8n service account.
@@ -119,9 +120,50 @@ command exits or times out.
 The ActorTemplate router target must match the daemon listen port and prepare
 `/home/user/workspace`. Commands run under the daemon's configured user.
 
-The provider creates an Actor egress policy that permits TLS passthrough only to
-`registry.npmjs.org:443`. This lets Agent workspaces install npm packages. All
-other outbound destinations remain denied.
+## Default egress policy
+
+Substrate v1 applies egress policies per Actor. A template's golden egress policy
+does not carry over to Actors created from it. n8n has no built-in destination
+allowlist. Configure a server-owned default policy before workspace setup needs
+to download npm packages.
+
+1. Copy the [example policy](../../../../docs/substrate-egress-policy.example.json)
+   to a JSON file readable by the n8n process.
+2. Mount that file read-only, for example at `/run/substrate/egress-policy.json`.
+3. Set `SUBSTRATE_EGRESS_POLICY_FILE=/run/substrate/egress-policy.json`.
+4. Restart n8n after you change the environment variable.
+
+The file contains rules, without resource metadata:
+
+```json
+{
+  "rules": [
+    {
+      "tlsPassthrough": {
+        "hostnames": ["registry.npmjs.org"],
+        "ports": { "numbers": [443] }
+      }
+    }
+  ]
+}
+```
+
+This example permits npm registry TLS traffic on port 443. Add only the hosts
+and ports your sandbox workloads need. This integration accepts TLS passthrough
+rules with explicit hostname and port lists. It rejects unsupported rule types
+and fields instead of silently dropping them. An empty rules list permits no
+outbound destinations.
+
+n8n reads and validates the file before Actor acquisition. It copies the rules
+into an Actor's `default` policy before resume when that Actor has no policy.
+Existing Actor policies remain unchanged. Changing the file affects newly
+created Actors and Actors without a policy; it does not reconcile existing
+policies. Use Substrate's policy API or CLI to change an existing policy.
+
+When the variable is unset, n8n makes no egress-policy calls. Substrate denies
+unmatched DNS and outbound traffic, so package downloads need an existing policy
+or a configured default. Egress policy files and rules are server-managed, not
+editable through an n8n credential or the sandbox connection form.
 
 ## Integration test
 

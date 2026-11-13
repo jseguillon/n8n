@@ -223,7 +223,7 @@ message CreateActorRequest { Actor actor = 1; }
 		});
 	});
 
-	it('creates a TLS passthrough policy for the npm registry', async () => {
+	it('serializes the configured TLS passthrough rules without adding destinations', async () => {
 		const protocol = parse(`syntax = "proto3";
 package substrate.ateapi.v1;
 message ObjectRef { string atespace = 1; string name = 2; }
@@ -239,7 +239,11 @@ message CreateActorEgressPolicyRequest { ObjectRef actor = 1; EgressPolicy egres
 		);
 		const control = new SubstrateControl(connection, 1_000);
 
-		await control.call('CreateActorEgressPolicy', 'n8n-workspace');
+		await control.call('CreateActorEgressPolicy', 'n8n-workspace', {
+			rules: [
+				{ tlsPassthrough: { hostnames: ['packages.example.test'], ports: { numbers: [8443] } } },
+			],
+		});
 
 		const request = makeUnaryRequest.mock.calls[0][0];
 		const decoded = protocol
@@ -255,8 +259,8 @@ message CreateActorEgressPolicyRequest { ObjectRef actor = 1; EgressPolicy egres
 				rules: [
 					{
 						tlsPassthrough: {
-							hostnames: ['registry.npmjs.org'],
-							ports: { numbers: [443] },
+							hostnames: ['packages.example.test'],
+							ports: { numbers: [8443] },
 						},
 					},
 				],
