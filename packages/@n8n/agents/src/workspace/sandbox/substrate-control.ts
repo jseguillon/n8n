@@ -17,32 +17,34 @@ export interface SubstrateConnection {
 	egressPolicyFile?: string;
 }
 
+const egressDestinationSchema = z
+	.object({
+		hostnames: z
+			.array(
+				z
+					.string()
+					.trim()
+					.min(1)
+					.max(253)
+					.regex(/^[a-zA-Z0-9.*-]+$/),
+			)
+			.min(1)
+			.max(256),
+		ports: z.union([
+			z.object({ numbers: z.array(z.number().int().min(1).max(65535)).min(1).max(16) }).strict(),
+			z.object({ all: z.object({}).strict() }).strict(),
+		]),
+	})
+	.strict();
+
 const egressPolicySchema = z
 	.object({
 		rules: z
 			.array(
-				z
-					.object({
-						tlsPassthrough: z
-							.object({
-								hostnames: z
-									.array(
-										z
-											.string()
-											.trim()
-											.min(1)
-											.max(253)
-											.regex(/^[a-zA-Z0-9.*-]+$/),
-									)
-									.min(1)
-									.max(256),
-								ports: z
-									.object({ numbers: z.array(z.number().int().min(1).max(65535)).min(1).max(256) })
-									.strict(),
-							})
-							.strict(),
-					})
-					.strict(),
+				z.union([
+					z.object({ tlsPassthrough: egressDestinationSchema }).strict(),
+					z.object({ http: egressDestinationSchema }).strict(),
+				]),
 			)
 			.max(256),
 	})
@@ -71,9 +73,11 @@ message ResumeActorRequest { ObjectRef actor = 1; }
 message DeleteOptions { int64 version = 1; string uid = 2; }
 message DeleteActorRequest { ObjectRef actor = 1; DeleteOptions options = 2; }
 message EgressPolicy { ResourceMetadata metadata = 1; repeated EgressRule rules = 2; }
-message EgressRule { TlsPassthroughRule tls_passthrough = 3; }
+message EgressRule { HttpRule http = 1; TlsPassthroughRule tls_passthrough = 3; }
+message HttpRule { repeated string hostnames = 1; Ports ports = 2; }
 message TlsPassthroughRule { repeated string hostnames = 1; Ports ports = 2; }
-message Ports { repeated int32 numbers = 2; }
+message Ports { AllPorts all = 1; repeated int32 numbers = 2; }
+message AllPorts {}
 message CreateActorEgressPolicyRequest { ObjectRef actor = 1; EgressPolicy egress_policy = 2; }
 `;
 let protocol: Root | undefined;
@@ -212,7 +216,7 @@ export class SubstrateControl {
 			return egressPolicySchema.parse(JSON.parse(contents));
 		} catch {
 			throw new Error(
-				'The server Substrate egress policy file is invalid; use supported TLS passthrough rules',
+				'The server Substrate egress policy file is invalid; use supported HTTP or TLS passthrough rules',
 			);
 		}
 	}

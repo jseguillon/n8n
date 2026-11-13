@@ -223,15 +223,17 @@ message CreateActorRequest { Actor actor = 1; }
 		});
 	});
 
-	it('serializes the configured TLS passthrough rules without adding destinations', async () => {
+	it('preserves configured HTTP, wildcard TLS, and all-port rules on the wire', async () => {
 		const protocol = parse(`syntax = "proto3";
 package substrate.ateapi.v1;
 message ObjectRef { string atespace = 1; string name = 2; }
 message ResourceMetadata { string atespace = 1; string name = 2; }
 message EgressPolicy { ResourceMetadata metadata = 1; repeated EgressRule rules = 2; }
-message EgressRule { TlsPassthroughRule tls_passthrough = 3; }
+message EgressRule { HttpRule http = 1; TlsPassthroughRule tls_passthrough = 3; }
+message HttpRule { repeated string hostnames = 1; Ports ports = 2; }
 message TlsPassthroughRule { repeated string hostnames = 1; Ports ports = 2; }
-message Ports { repeated int32 numbers = 2; }
+message Ports { AllPorts all = 1; repeated int32 numbers = 2; }
+message AllPorts {}
 message CreateActorEgressPolicyRequest { ObjectRef actor = 1; EgressPolicy egress_policy = 2; }
 `).root;
 		readFile.mockImplementation(async (path: string) =>
@@ -242,6 +244,8 @@ message CreateActorEgressPolicyRequest { ObjectRef actor = 1; EgressPolicy egres
 		await control.call('CreateActorEgressPolicy', 'n8n-workspace', {
 			rules: [
 				{ tlsPassthrough: { hostnames: ['packages.example.test'], ports: { numbers: [8443] } } },
+				{ http: { hostnames: ['*'], ports: { numbers: [80] } } },
+				{ tlsPassthrough: { hostnames: ['*'], ports: { all: {} } } },
 			],
 		});
 
@@ -263,6 +267,8 @@ message CreateActorEgressPolicyRequest { ObjectRef actor = 1; EgressPolicy egres
 							ports: { numbers: [8443] },
 						},
 					},
+					{ http: { hostnames: ['*'], ports: { numbers: [80] } } },
+					{ tlsPassthrough: { hostnames: ['*'], ports: { all: {} } } },
 				],
 			},
 		});
