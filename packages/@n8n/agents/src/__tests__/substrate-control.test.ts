@@ -44,12 +44,19 @@ describe('SubstrateControl', () => {
 		]);
 	});
 
-	it('copies administrator-defined rules before resuming an Actor', async () => {
-		const policy = {
+	it.each([
+		{
 			rules: [
 				{ tlsPassthrough: { hostnames: ['packages.example.test'], ports: { numbers: [8443] } } },
 			],
-		};
+		},
+		{
+			rules: [
+				{ http: { hostnames: ['*'], ports: { numbers: [80] } } },
+				{ tlsPassthrough: { hostnames: ['*'], ports: { all: {} } } },
+			],
+		},
+	])('copies administrator-defined rules before resuming an Actor: %j', async (policy) => {
 		vi.mocked(readFile).mockResolvedValue(JSON.stringify(policy));
 		const control = new SubstrateControl(
 			{ ...connection, egressPolicyFile: '/run/config/egress.json' },
@@ -107,6 +114,13 @@ describe('SubstrateControl', () => {
 			rules: [{ tlsPassthrough: { hostnames: ['example.test'], ports: { numbers: [0] } } }],
 		}),
 		JSON.stringify({ rules: [], unexpected: 'not supported' }),
+		JSON.stringify({
+			rules: [{ tlsPassthrough: { hostnames: ['*'], ports: { numbers: [443], all: {} } } }],
+		}),
+		JSON.stringify({ rules: [{ http: { hostnames: ['*'], ports: { all: { enabled: true } } } }] }),
+		JSON.stringify({
+			rules: [{ http: { hostnames: ['*'], ports: { numbers: [80] }, effects: {} } }],
+		}),
 	])(
 		'rejects invalid or unsupported configured rules before creating an Actor: %s',
 		async (contents) => {

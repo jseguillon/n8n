@@ -69,9 +69,11 @@ message Actor { ActorStatus status = 5; }
 message Container { string name = 1; string image = 2; }
 message ActorTemplate { repeated Container containers = 3; }
 message EgressPolicy { repeated EgressRule rules = 2; }
-message EgressRule { TlsPassthroughRule tls_passthrough = 3; }
+message EgressRule { HttpRule http = 1; TlsPassthroughRule tls_passthrough = 3; }
+message HttpRule { repeated string hostnames = 1; Ports ports = 2; }
 message TlsPassthroughRule { repeated string hostnames = 1; Ports ports = 2; }
-message Ports { repeated int32 numbers = 2; }
+message Ports { AllPorts all = 1; repeated int32 numbers = 2; }
+message AllPorts {}
 `).root;
 		async function rpc(method, requestName, responseName, request) {
 			const [ca, token] = await Promise.all([
