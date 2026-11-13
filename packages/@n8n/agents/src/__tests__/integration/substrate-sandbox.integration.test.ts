@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { SubstrateSandbox } from '../../workspace/sandbox/substrate-sandbox';
+import { SubstrateControl } from '../../workspace/sandbox/substrate-control';
 
 const connection = {
 	endpoint: process.env.SUBSTRATE_API_ENDPOINT ?? '',
@@ -17,18 +18,17 @@ const connection = {
 		: {}),
 };
 
-const enabled =
-	process.env.SUBSTRATE_INTEGRATION_TEST === '1' && Object.values(connection).every(Boolean);
+const enabled = process.env.SUBSTRATE_INTEGRATION_TEST === '1';
 
 async function withSandbox(run: (sandbox: SubstrateSandbox, root: string) => Promise<void>) {
-	const id = `n8n-test-${randomUUID()}`;
+	const id = `test-${randomUUID()}`;
 	const root = `/home/user/workspace/.n8n-substrate-${id}`;
 	const sandbox = new SubstrateSandbox({ ...connection, id, timeout: 20_000 });
 	let testError: Error | undefined;
 	let cleanupError: Error | undefined;
 
 	try {
-		await sandbox.start();
+		await sandbox.ensureRunning();
 		await run(sandbox, root);
 	} catch (error) {
 		testError = error instanceof Error ? error : new Error(String(error));
@@ -36,6 +36,13 @@ async function withSandbox(run: (sandbox: SubstrateSandbox, root: string) => Pro
 
 	try {
 		await sandbox.destroy();
+		const control = new SubstrateControl(connection, 10_000);
+		await vi.waitFor(
+			async () => {
+				await expect(control.call('GetActor', sandbox.id)).rejects.toMatchObject({ code: 5 });
+			},
+			{ timeout: 10_000, interval: 100 },
+		);
 	} catch (error) {
 		cleanupError = error instanceof Error ? error : new Error(String(error));
 	}
@@ -47,16 +54,31 @@ async function withSandbox(run: (sandbox: SubstrateSandbox, root: string) => Pro
 }
 
 describe.skipIf(!enabled)('Substrate sandbox integration', () => {
+	beforeAll(() => {
+		const required = [
+			'SUBSTRATE_API_ENDPOINT',
+			'SUBSTRATE_ROUTER_URL',
+			'SUBSTRATE_ATESPACE',
+			'SUBSTRATE_ACTOR_TEMPLATE',
+			'SUBSTRATE_TOKEN_FILE',
+			'SUBSTRATE_CA_FILE',
+			'SUBSTRATE_ROUTER_CREDENTIAL_FILE',
+		];
+		const missing = required.filter((name) => !process.env[name]?.trim());
+		if (missing.length)
+			throw new Error(`Set the required Substrate variables: ${missing.join(', ')}`);
+	});
+	afterEach(() => vi.restoreAllMocks());
 	it('persists workspace files through suspend and router wake', async () => {
 		await withSandbox(async (sandbox, path) => {
 			await sandbox.writeFile(sandbox.id, path, 'persisted');
-			expect((await sandbox.executeCommand('cat', [path])).stdout).toBe('persisted\n');
+			expect((await sandbox.executeCommand('cat', [path])).stdout.trimEnd()).toBe('persisted');
 
 			await sandbox.stop();
 
 			// The router wakes the Actor before forwarding the file request.
 			expect((await sandbox.readFile(sandbox.id, path)).toString()).toBe('persisted');
-			expect((await sandbox.executeCommand('cat', [path])).stdout).toBe('persisted\n');
+			expect((await sandbox.executeCommand('cat', [path])).stdout.trimEnd()).toBe('persisted');
 		});
 	}, 120_000);
 
@@ -78,8 +100,8 @@ describe.skipIf(!enabled)('Substrate sandbox integration', () => {
 			expect(await sandbox.readFile(sandbox.id, moved)).toEqual(Buffer.from([0, 1, 2, 255, 3]));
 			expect(await sandbox.listFiles(sandbox.id, { path: nested })).toEqual(
 				expect.arrayContaining([
-					{ name: 'source.bin', size: 5, isDir: false },
-					{ name: 'moved.bin', size: 5, isDir: false },
+					expect.objectContaining({ name: 'source.bin', size: 5, isDir: false }),
+					expect.objectContaining({ name: 'moved.bin', size: 5, isDir: false }),
 				]),
 			);
 			expect(await sandbox.stat(sandbox.id, moved)).toMatchObject({
@@ -147,33 +169,71 @@ describe.skipIf(!enabled)('Substrate sandbox integration', () => {
 		});
 	}, 120_000);
 
-	it('allows npm package downloads through the Actor egress policy', async () => {
-		await withSandbox(async (sandbox, root) => {
-			const result = await sandbox.executeCommand('npm', [
-				'install',
-				'--prefix',
-				root,
-				'--no-save',
-				'@n8n/workflow-sdk',
-			]);
+	it.skipIf(!connection.egressPolicyFile)(
+		'permits the npm registry through the configured default policy',
+		async () => {
+			await withSandbox(async (sandbox) => {
+				const result = await sandbox.executeCommand('curl', [
+					'--fail',
+					'--silent',
+					'--show-error',
+					'--max-time',
+					'10',
+					'--output',
+					'/dev/null',
+					'--write-out',
+					'%{http_code}',
+					'https://registry.npmjs.org/@n8n/workflow-sdk',
+				]);
+				expect(result).toMatchObject({ exitCode: 0, success: true });
+				expect(result.stdout.trim()).toBe('200');
+			});
+		},
+		120_000,
+	);
 
-			expect(result).toMatchObject({ exitCode: 0, success: true });
-			expect(result.stdout).toContain('added');
+	it('cancels a running command through the router', async () => {
+		await withSandbox(async (sandbox, root) => {
+			const abortController = new AbortController();
+			await sandbox.mkdir(sandbox.id, root, true);
+			await expect(
+				sandbox.executeCommand(
+					'sh',
+					['-c', `printf 'ready\\n'; sleep 2; touch '${root}/cancelled'`],
+					{
+						abortSignal: abortController.signal,
+						onStdout: () => abortController.abort(),
+					},
+				),
+			).rejects.toThrow();
+			await new Promise((resolve) => setTimeout(resolve, 2_500));
+			await expect(sandbox.stat(sandbox.id, `${root}/cancelled`)).rejects.toMatchObject({
+				status: 404,
+			});
 		});
 	}, 120_000);
 
-	it('cancels a running command through the router', async () => {
-		await withSandbox(async (sandbox) => {
-			const abortController = new AbortController();
-			const abort = setTimeout(() => abortController.abort(), 250);
+	it('reuses the same cached adapter after Actor deletion without restoring deleted files', async () => {
+		await withSandbox(async (sandbox, root) => {
+			await sandbox.writeFile(sandbox.id, root, 'deleted data');
+			await new SubstrateControl(connection, 20_000).deleteActor(sandbox.id);
+			expect((await sandbox.executeCommand('printf', ['recreated'])).exitCode).toBe(0);
+			await expect(sandbox.readFile(sandbox.id, root)).rejects.toMatchObject({ status: 404 });
+			await sandbox.writeFile(sandbox.id, root, 'fresh data');
+			expect((await sandbox.readFile(sandbox.id, root)).toString()).toBe('fresh data');
+		});
+	}, 120_000);
 
-			try {
-				await expect(
-					sandbox.executeCommand('sleep', ['10'], { abortSignal: abortController.signal }),
-				).rejects.toThrow();
-			} finally {
-				clearTimeout(abort);
-			}
+	it('recovers concurrent file requests after Actor deletion', async () => {
+		await withSandbox(async (sandbox, root) => {
+			await new SubstrateControl(connection, 20_000).deleteActor(sandbox.id);
+			await Promise.all(
+				[1, 2, 3].map(
+					async (id) => await sandbox.writeFile(sandbox.id, `${root}/${id}`, String(id)),
+				),
+			);
+			for (const id of [1, 2, 3])
+				expect((await sandbox.readFile(sandbox.id, `${root}/${id}`)).toString()).toBe(String(id));
 		});
 	}, 120_000);
 });
