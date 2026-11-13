@@ -10,6 +10,7 @@ loadEnv({ path: resolve(__dirname, '.env'), quiet: true });
 export default defineConfig({
 	test: {
 		include: ['src/__tests__/integration/**/*.test.ts'],
+		exclude: ['src/__tests__/integration/substrate-sandbox.integration.test.ts'],
 		setupFiles: ['vitest.integration.setup.ts'],
 		reporters: profilingReporters(['default']),
 		testTimeout: 120_000,

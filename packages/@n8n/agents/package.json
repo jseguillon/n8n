@@ -84,6 +84,7 @@
     "watch": "tsc -p tsconfig.build.json --watch",
     "test": "vitest run",
     "test:unit": "vitest run",
+    "test:substrate:live": "vitest run --config vitest.substrate.config.mjs",
     "test:dev": "vitest --silent=false",
     "test:integration": "cross-env TZ=UTC vitest run --config vitest.integration.config.mjs",
     "test:integration:replay": "cross-env TZ=UTC CI=1 vitest run --config vitest.integration.config.mjs",

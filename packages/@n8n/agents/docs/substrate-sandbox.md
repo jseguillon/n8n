@@ -172,9 +172,15 @@ The Substrate integration suite is disabled by default. Set
 variables to run it against a private test Atespace:
 
 ```sh
-pnpm test:integration src/__tests__/integration/substrate-sandbox.integration.test.ts
+SUBSTRATE_INTEGRATION_TEST=1 pnpm test:substrate:live
 ```
 
-The suite creates and deletes Actors. It verifies lifecycle wake and persistence,
-router filesystem operations, command results, timeout, and cancellation. Do not
-run it against a shared production Atespace.
+The SDK suite creates and deletes Actors. It verifies lifecycle wake and
+persistence, router filesystem operations, command results, timeout, cancellation,
+and cached-adapter recovery. It is separate from the LLM recording setup.
+
+For coordinator behavior, run the [packaged-runtime live suite](../../../cli/test/live/README.md).
+It uses a temporary database, checks the expected published sandbox-image digest,
+and verifies actual ATE states. The guide includes a command that runs the same
+maintained test file inside an n8n pod without installing test dependencies.
+Never run either suite against a shared production Atespace.
