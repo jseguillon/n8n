@@ -1,0 +1,10 @@
+{
+	"rules": [
+		{
+			"tlsPassthrough": {
+				"hostnames": ["registry.npmjs.org"],
+				"ports": { "numbers": [443] }
+			}
+		}
+	]
+}

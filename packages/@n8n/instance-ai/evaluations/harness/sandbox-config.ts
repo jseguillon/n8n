@@ -90,6 +90,9 @@ export function resolveSandboxConfig(env: NodeJS.ProcessEnv): SandboxConfig {
 			caFile: env.SUBSTRATE_CA_FILE ?? '',
 			routerCredentialFile: env.SUBSTRATE_ROUTER_CREDENTIAL_FILE ?? '',
 			serverName: env.SUBSTRATE_SERVER_NAME ?? 'api.ate-system.svc',
+			...(env.SUBSTRATE_EGRESS_POLICY_FILE
+				? { egressPolicyFile: env.SUBSTRATE_EGRESS_POLICY_FILE }
+				: {}),
 		};
 		const missing = [
 			['SUBSTRATE_API_ENDPOINT', connection.endpoint],

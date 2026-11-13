@@ -12,6 +12,9 @@ const connection = {
 	caFile: process.env.SUBSTRATE_CA_FILE ?? '',
 	routerCredentialFile: process.env.SUBSTRATE_ROUTER_CREDENTIAL_FILE ?? '',
 	serverName: process.env.SUBSTRATE_SERVER_NAME ?? 'api.ate-system.svc',
+	...(process.env.SUBSTRATE_EGRESS_POLICY_FILE
+		? { egressPolicyFile: process.env.SUBSTRATE_EGRESS_POLICY_FILE }
+		: {}),
 };
 
 const enabled =

@@ -78,6 +78,7 @@ describe('SandboxSettingsService', () => {
 				substrateAtespace: '',
 				substrateTemplate: '',
 				substrateServerName: '',
+				substrateEgressPolicyFile: '',
 				sandboxTimeout: 5_000,
 				sandboxEphemeral: false,
 			});
@@ -134,6 +135,15 @@ describe('SandboxSettingsService', () => {
 			).rejects.toThrow('access token or server token file');
 		});
 
+		it('adds the server default egress policy to a saved connection', async () => {
+			globalConfig.instanceAi.substrateEgressPolicyFile = '/server/egress-policy.json';
+			await expect(
+				service.getSubstrateConfig({ type: 'substrateApi', data }),
+			).resolves.toMatchObject({
+				connection: { egressPolicyFile: '/server/egress-policy.json' },
+			});
+		});
+
 		it.each([
 			{ endpoint: 'https://api.example.test' },
 			{ endpoint: 'api.example.test:70000' },
@@ -143,6 +153,8 @@ describe('SandboxSettingsService', () => {
 			{ caFile: '/unexpected/ca' },
 			{ routerCredentialFile: '/unexpected/router-identity.pem' },
 			{ serverName: 'unexpected.example.test' },
+			{ egressPolicyFile: '/unexpected/policy.json' },
+			{ egressPolicy: { rules: [] } },
 		])('rejects invalid or server-only fields: %j', async (invalid) => {
 			await expect(
 				service.getSubstrateConfig({ type: 'substrateApi', data: { ...data, ...invalid } }),

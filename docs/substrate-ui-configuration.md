@@ -18,6 +18,7 @@ instance credential. Deployment settings remain with the server operator.
 | Renewable token file path | Server environment and mount only | The operator owns file access and renewal |
 | Private CA file and TLS server-name override | Server environment only | The operator owns the trust boundary |
 | Router client identity bundle | Server environment and mount only | Authenticates n8n to the router through mTLS |
+| Default Actor egress policy file | Server environment and mount only | Administrator-defined rules copied to Actors without a policy |
 | Kubernetes identity, worker images, and template definitions | Server operator | They are not sandbox connection fields |
 | Timeouts and lifecycle policy | Server operator | They control runtime behavior |
 
@@ -61,6 +62,7 @@ environment:
   SUBSTRATE_CA_FILE: /run/substrate/ca.crt
   SUBSTRATE_ROUTER_CREDENTIAL_FILE: /run/substrate/router-identity.pem
   SUBSTRATE_SERVER_NAME: api.ate-system.svc
+  SUBSTRATE_EGRESS_POLICY_FILE: /run/substrate/egress-policy.json
 volumes:
   - /operator/connection:/run/substrate:ro
 ```
@@ -73,6 +75,14 @@ The router identity bundle contains the client certificate chain and private
 key. The router must trust its identity. The Control API bearer token does not
 replace this bundle. See the external installation guide for identity issuance
 and renewal.
+
+Create `egress-policy.json` from the [example](substrate-egress-policy.example.json)
+and place it in the mounted configuration directory. The example permits TLS to
+the npm registry on port 443. n8n copies the configured rules to each Actor that
+does not already have a policy. It leaves existing policies unchanged. Without
+this setting, n8n creates no egress policy. See the [default egress policy
+guide](../packages/@n8n/agents/docs/substrate-sandbox.md#default-egress-policy)
+for the supported format and update behavior.
 
 To use UI-owned connection settings, do not force these values in the process
 environment:
