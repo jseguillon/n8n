@@ -34,6 +34,47 @@ describe('Substrate Actor operation revisions', () => {
 		manager.getRepository.mockReturnValue(rows);
 	});
 
+	it.each([false, true])(
+		'updates a previous connection fingerprint only when the operator approves it: %s',
+		async (approved) => {
+			rows.findOneBy.mockResolvedValue({
+				...activity,
+				operationLeases: { existing: now.getTime() + 30_000 },
+			});
+			rows.update.mockResolvedValue({ affected: 1, generatedMaps: [], raw: [] });
+			const input = {
+				actorId: activity.actorId,
+				connectionFingerprint: 'new-connection',
+				autoStopMinutes: 5,
+				autoDeleteMinutes: -1,
+				ephemeral: false,
+			};
+			expect(
+				await repository.startOperation(
+					input,
+					'new-operation',
+					60_000,
+					now,
+					approved ? ['connection'] : [],
+				),
+			).toBe(approved);
+			if (approved) {
+				expect(rows.update).toHaveBeenCalledWith(
+					{ actorId: activity.actorId, revision: 1 },
+					expect.objectContaining({
+						connectionFingerprint: 'new-connection',
+						operationLeases: {
+							existing: now.getTime() + 30_000,
+							'new-operation': now.getTime() + 60_000,
+						},
+					}),
+				);
+			} else {
+				expect(rows.update).not.toHaveBeenCalled();
+			}
+		},
+	);
+
 	it('retries a lost revision even when activity timestamps are identical', async () => {
 		rows.findOneBy
 			.mockResolvedValueOnce(activity)

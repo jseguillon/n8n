@@ -5,8 +5,45 @@
 `executionTimeMs` is command execution inside the sandbox, in milliseconds.
 It is not the command timeout. Assistant turn time also includes model calls,
 context collection, lazy workspace initialization, transport, and lifecycle work.
-The first workspace tool prepares the workflow SDK and workspace files before
-it executes the requested command.
+The first workspace tool prepares workspace files before it executes the
+requested command. An unprepared Actor also installs workflow dependencies.
+
+## Template-managed initialization
+
+The companion sandbox image supplies Node.js, the daemon, and system tools.
+It does not install npm workspace dependencies or global TypeScript.
+The ActorTemplate owns the pinned package manifest, bootstrap `command`, and
+`args`. Its command installs and validates dependencies, publishes a manifest
+hash marker atomically, and then starts the daemon. A repeated start with the
+same marker does not reinstall packages or overwrite user workspace files.
+
+Substrate v1 uses the container `wakeupProbe` to gate readiness. The template
+controller creates its golden snapshot after that readiness check succeeds.
+Because the daemon starts only after bootstrap completes, its `/healthz` probe
+also gates capture of the prepared environment. The template enables golden
+snapshots and gives bootstrap a 180-second readiness budget.
+
+The template's registry-only `goldenEgressPolicy` lets the golden Actor install
+packages. Enable the `GoldenEgressPolicy` preview gate on both `ate-api-server`
+and `ate-controller`, then create the template with `kubectl ate --preview`.
+Actor policies are still copied separately by n8n; the golden policy is not
+inherited by new Actors.
+
+New Actors use the template's prepared golden snapshot with
+`SUBSTRATE_ACTOR_TAG` unset. n8n still validates the local dependency tree before
+it skips installation. A manifest mismatch uses the existing install path.
+The companion `substrate/README.md` documents the complete bootstrap.
+
+### Preserve existing Actors during a template upgrade
+
+ActorTemplates are immutable. Create a new versioned template instead of
+deleting the old one. Set `SUBSTRATE_ACTOR_TEMPLATE` to the new name and list
+approved previous names in `SUBSTRATE_PREVIOUS_ACTOR_TEMPLATES`, separated by
+commas. n8n accepts existing Actors only from that explicit same-Atespace list.
+It keeps each Actor on its original template and preserves its files and state.
+The activity repository accepts the approved connection fingerprints and keeps
+their operation leases. Recovery cleanup also handles those previous templates.
+Remove an old name only after its Actors have been retired.
 
 ## Measurements on 2026-11-17
 
@@ -22,8 +59,8 @@ no user context. These measurements do not include LLM latency.
 | Reused marker check plus `ls`, five samples | 0.482–0.523 s | 0.385–0.432 s |
 | Daemon `ls` execution, same samples | 8–12 ms | 7–9 ms |
 
-The installed dependency versions in the base image differ from the n8n runtime.
-The runtime requests workflow SDK `0.41.0`; the base image contains `0.36.5`.
+The dependency versions in the baseline image differed from the n8n runtime.
+The runtime requested workflow SDK `0.41.0`; that image contained `0.36.5`.
 Changing snapshot fidelity does not remove that first-use installation.
 A separate `--prefer-offline` trial still took 14–17 seconds to install.
 
@@ -61,7 +98,10 @@ can keep its memory even with ROOTFS preference. The fresh-Actor test above used
 durable tags with confirmed fidelity `3` and `2`, rather than relying only on
 node-local resume behavior.
 
-## Prepare shared runtime dependencies once
+## Optional: prepare a tag for a legacy template
+
+The primary approach above uses the template's own golden snapshot. This
+manual-tag path remains available for an existing template that cannot be changed.
 
 Use a new tag name for each n8n dependency set. The preparation script creates
 its own Actor from the configured template. It writes only the generated public

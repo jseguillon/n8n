@@ -26,6 +26,14 @@ export function substrateSandboxConfig(config: InstanceAiConfig): SubstrateSandb
 		connection: {
 			...connection,
 			...(config.substrateActorTag ? { actorTag: config.substrateActorTag } : {}),
+			...(config.substratePreviousTemplates
+				? {
+						previousTemplates: config.substratePreviousTemplates
+							.split(',')
+							.map((name) => name.trim())
+							.filter(Boolean),
+					}
+				: {}),
 			...(config.substrateEgressPolicyFile
 				? { egressPolicyFile: config.substrateEgressPolicyFile }
 				: {}),

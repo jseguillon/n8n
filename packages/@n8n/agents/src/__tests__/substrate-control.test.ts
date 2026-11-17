@@ -164,6 +164,29 @@ describe('SubstrateControl', () => {
 		expect(call).not.toHaveBeenCalledWith('ResumeActor', 'n8n-workspace');
 	});
 
+	it.each(['test-space', 'other-space'])(
+		'accepts an operator-approved previous template only in its configured Atespace: %s',
+		async (atespace) => {
+			const control = new SubstrateControl(
+				{ ...connection, previousTemplates: ['previous-template'] },
+				60_000,
+			);
+			const call = vi.spyOn(control, 'call').mockResolvedValue({
+				metadata: { atespace: 'test-space', name: 'n8n-workspace' },
+				actorTemplate: { atespace, name: 'previous-template' },
+			});
+			if (atespace === connection.atespace) {
+				await control.ensureActor('n8n-workspace');
+				expect(call).toHaveBeenLastCalledWith('ResumeActor', 'n8n-workspace');
+			} else {
+				await expect(control.ensureActor('n8n-workspace')).rejects.toThrow(
+					'different Substrate template',
+				);
+				expect(call).not.toHaveBeenCalledWith('ResumeActor', 'n8n-workspace');
+			}
+		},
+	);
+
 	it('ignores a missing Actor during deletion', async () => {
 		const control = new SubstrateControl(connection, 60_000);
 		vi.spyOn(control, 'call').mockRejectedValue(

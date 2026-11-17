@@ -44,6 +44,9 @@ export class SubstrateActorLifecycleService {
 		policy: SubstrateActorLifecyclePolicy,
 	): SubstrateOperationRecorder {
 		const fingerprint = connectionFingerprint(connection);
+		const previousFingerprints = (connection.previousTemplates ?? []).map((template) =>
+			connectionFingerprint({ ...connection, template }),
+		);
 		return async (actorId, operationId, phase, timeoutMs, abortSignal) => {
 			if (phase === 'started') {
 				abortSignal?.throwIfAborted();
@@ -52,6 +55,15 @@ export class SubstrateActorLifecycleService {
 					connectionFingerprint: fingerprint,
 					...policy,
 				};
+				if (previousFingerprints.length > 0) {
+					return await this.activityRepository.startOperation(
+						input,
+						operationId,
+						timeoutMs + 60_000,
+						undefined,
+						previousFingerprints,
+					);
+				}
 				return await this.activityRepository.startOperation(input, operationId, timeoutMs + 60_000);
 			}
 			if (phase === 'heartbeat')
@@ -117,12 +129,21 @@ export class SubstrateActorLifecycleService {
 	async cleanupIdleActors(signal?: AbortSignal, now = Date.now()): Promise<void> {
 		if (this.sandboxSettingsService.getProvider() !== 'substrate') return;
 		const config = await this.sandboxSettingsService.getSubstrateConfig();
-		const fingerprint = connectionFingerprint(config.connection);
+		const connections = [
+			config.connection,
+			...(config.connection.previousTemplates ?? []).map((template) => ({
+				...config.connection,
+				template,
+			})),
+		];
 		for (const activity of await this.activityRepository.findAll()) {
 			if (signal?.aborted) return;
-			if (activity.connectionFingerprint !== fingerprint) continue;
+			const connection = connections.find(
+				(candidate) => connectionFingerprint(candidate) === activity.connectionFingerprint,
+			);
+			if (!connection) continue;
 			try {
-				await this.reclaim(activity.actorId, config.connection, true, new Date(now));
+				await this.reclaim(activity.actorId, connection, true, new Date(now));
 			} catch (error) {
 				this.logFailure(activity.actorId, error);
 			}

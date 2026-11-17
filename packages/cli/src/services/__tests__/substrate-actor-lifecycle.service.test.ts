@@ -1,7 +1,7 @@
 import { createSandbox } from '@n8n/agents/sandbox';
 import type { SubstrateSandboxConfig, WorkspaceSandbox } from '@n8n/agents/sandbox';
 import type { Logger } from '@n8n/backend-common';
-import type { SubstrateActorActivityRepository } from '@n8n/db';
+import type { SubstrateActorActivity, SubstrateActorActivityRepository } from '@n8n/db';
 import { mock } from 'vitest-mock-extended';
 
 import type { SandboxSettingsService } from '../sandbox-settings.service';
@@ -72,6 +72,49 @@ describe('Substrate Actor coordinator', () => {
 		await recorder('n8n-test', 'first', 'finished', 60_000);
 		expect(repository.claimDueActor).not.toHaveBeenCalled();
 		await recorder('n8n-test', 'upload', 'finished', 60_000);
+		expect(sandbox.stop).toHaveBeenCalledOnce();
+	});
+
+	it('accepts only fingerprints derived from operator-approved previous templates', async () => {
+		await service.createOperationRecorder(connection, policy)('n8n-test', 'old', 'started', 60_000);
+		const oldFingerprint = repository.startOperation.mock.calls[0][0].connectionFingerprint;
+		await service.createOperationRecorder(
+			{ ...connection, template: 'new-template', previousTemplates: [connection.template] },
+			policy,
+		)('n8n-test', 'new', 'started', 60_000);
+		expect(repository.startOperation).toHaveBeenLastCalledWith(
+			expect.objectContaining({ connectionFingerprint: expect.not.stringMatching(oldFingerprint) }),
+			'new',
+			120_000,
+			undefined,
+			[oldFingerprint],
+		);
+	});
+
+	it('keeps recovery cleanup active for an approved previous template', async () => {
+		await service.createOperationRecorder(connection, policy)('n8n-test', 'old', 'started', 60_000);
+		const oldFingerprint = repository.startOperation.mock.calls[0][0].connectionFingerprint;
+		settings.getProvider.mockReturnValue('substrate');
+		settings.getSubstrateConfig.mockResolvedValue({
+			enabled: true,
+			provider: 'substrate',
+			connection: {
+				...connection,
+				template: 'new-template',
+				previousTemplates: [connection.template],
+			},
+		});
+		repository.findAll.mockResolvedValue([
+			mock<SubstrateActorActivity>({ actorId: 'n8n-test', connectionFingerprint: oldFingerprint }),
+		]);
+		await service.cleanupIdleActors(undefined, now.getTime());
+		expect(repository.claimDueActor).toHaveBeenCalledWith(
+			'n8n-test',
+			oldFingerprint,
+			expect.any(String),
+			now,
+			true,
+		);
 		expect(sandbox.stop).toHaveBeenCalledOnce();
 	});
 
