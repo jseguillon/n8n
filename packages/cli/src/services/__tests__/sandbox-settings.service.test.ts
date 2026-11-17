@@ -77,6 +77,8 @@ describe('SandboxSettingsService', () => {
 				substrateRouterUrl: '',
 				substrateAtespace: '',
 				substrateTemplate: '',
+				substrateActorTag: '',
+				substratePreviousTemplates: '',
 				substrateServerName: '',
 				substrateEgressPolicyFile: '',
 				sandboxTimeout: 5_000,
@@ -151,6 +153,15 @@ describe('SandboxSettingsService', () => {
 			).resolves.toMatchObject({ connection: { actorTag: 'runtime-dependencies' } });
 		});
 
+		it('adds an operator previous-template allowlist to a saved connection', async () => {
+			globalConfig.instanceAi.substratePreviousTemplates = ' old-template, other-template , ';
+			await expect(
+				service.getSubstrateConfig({ type: 'substrateApi', data }),
+			).resolves.toMatchObject({
+				connection: { previousTemplates: ['old-template', 'other-template'] },
+			});
+		});
+
 		it.each([
 			{ endpoint: 'https://api.example.test' },
 			{ endpoint: 'api.example.test:70000' },
@@ -163,6 +174,7 @@ describe('SandboxSettingsService', () => {
 			{ egressPolicyFile: '/unexpected/policy.json' },
 			{ egressPolicy: { rules: [] } },
 			{ actorTag: 'unexpected-tag' },
+			{ previousTemplates: ['unexpected-template'] },
 		])('rejects invalid or server-only fields: %j', async (invalid) => {
 			await expect(
 				service.getSubstrateConfig({ type: 'substrateApi', data: { ...data, ...invalid } }),

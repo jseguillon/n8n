@@ -98,6 +98,7 @@ export function parseSubstrateCredential({ type, data }: SandboxCredential) {
 			'egressPolicyFile',
 			'egressPolicy',
 			'actorTag',
+			'previousTemplates',
 		].some((field) => field in data)
 	) {
 		throw new UnprocessableRequestError(
@@ -225,6 +226,14 @@ export class SandboxSettingsService {
 					? { egressPolicyFile: this.config.substrateEgressPolicyFile }
 					: {}),
 				...(this.config.substrateActorTag ? { actorTag: this.config.substrateActorTag } : {}),
+				...(this.config.substratePreviousTemplates
+					? {
+							previousTemplates: this.config.substratePreviousTemplates
+								.split(',')
+								.map((name) => name.trim())
+								.filter(Boolean),
+						}
+					: {}),
 			},
 			timeout: this.config.sandboxTimeout,
 			ephemeral: this.config.sandboxEphemeral,

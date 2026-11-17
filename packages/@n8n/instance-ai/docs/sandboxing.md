@@ -91,9 +91,13 @@ applies only to Daytona.
 
 The first Substrate workspace tool prepares workflow dependencies before the
 requested operation. A small command can therefore have a much larger first-use
-wall time than its daemon `executionTimeMs`. Configure `SUBSTRATE_ACTOR_TAG` with
-an operator-prepared dependency-only snapshot to reduce this cost. Setup checks
-the complete local dependency tree and skips installation when it matches.
+wall time than its daemon `executionTimeMs`. The companion ActorTemplate uses
+an idempotent bootstrap and readiness probe to prepare dependencies before its
+golden snapshot. Keep `SUBSTRATE_ACTOR_TAG` unset to use that snapshot. Setup
+checks the complete local dependency tree and skips installation when it matches.
+An optional manual seed tag supports older templates. Use
+`SUBSTRATE_PREVIOUS_ACTOR_TEMPLATES` to retain existing Actors during a template
+upgrade without moving them or changing their files.
 See the [startup guide](../../../../docs/substrate-startup-latency.md).
 
 ## Thread-Scoped Lifecycle

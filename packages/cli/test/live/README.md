@@ -32,6 +32,8 @@ SUBSTRATE_ROUTER_CREDENTIAL_FILE
 SUBSTRATE_EGRESS_POLICY_FILE
 SUBSTRATE_SERVER_NAME  # optional; default api.ate-system.svc
 SUBSTRATE_ACTOR_TAG    # optional; prepared tag in the test Atespace and template
+SUBSTRATE_PREVIOUS_ACTOR_TEMPLATES # optional; approved old template names
+SUBSTRATE_TEST_PREPARED_TEMPLATE   # set to 1 to verify template bootstrap
 ```
 
 The installation and identities remain externally managed. See the
@@ -100,3 +102,10 @@ deletes its Actor. It does not copy existing workspaces or set their setup marke
 With `SUBSTRATE_ACTOR_TAG` set, the live suite also verifies source-tag provenance
 and workspace initialization without npm installation. With no tag, that one
 check is explicitly skipped. The remaining lifecycle checks still run.
+
+For the template-managed golden snapshot, unset `SUBSTRATE_ACTOR_TAG` and set
+`SUBSTRATE_TEST_PREPARED_TEMPLATE=1`. The startup check requires the template's
+readiness marker and verifies that n8n does not run npm install. With an approved
+previous-template allowlist, a separate check creates an Actor on the old
+template and verifies reattachment, preserved files, and operation coordination
+under the new configuration. The test does not move or mutate existing Actors.

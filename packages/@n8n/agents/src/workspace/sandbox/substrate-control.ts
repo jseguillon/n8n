@@ -9,6 +9,8 @@ export interface SubstrateConnection {
 	template: string;
 	/** Optional operator-prepared snapshot used only when an Actor is created. */
 	actorTag?: string;
+	/** Explicit operator allowlist for Actors created before a template upgrade. */
+	previousTemplates?: string[];
 	tokenFile: string;
 	/** Static bearer credential. A server-mounted token file takes precedence. */
 	token?: string;
@@ -199,7 +201,9 @@ export class SubstrateControl {
 		const actor = actorSchema.parse(await this.call('GetActor', name));
 		if (
 			actor.actorTemplate.atespace !== this.connection.atespace ||
-			actor.actorTemplate.name !== this.connection.template
+			![this.connection.template, ...(this.connection.previousTemplates ?? [])].includes(
+				actor.actorTemplate.name,
+			)
 		) {
 			throw new Error('The existing Actor uses a different Substrate template');
 		}

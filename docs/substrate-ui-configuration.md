@@ -20,6 +20,7 @@ instance credential. Deployment settings remain with the server operator.
 | Router client identity bundle | Server environment and mount only | Authenticates n8n to the router through mTLS |
 | Default Actor egress policy file | Server environment and mount only | Administrator-defined rules copied to Actors without a policy |
 | Dependency snapshot tag (`SUBSTRATE_ACTOR_TAG`) | Server environment only | Seeds new Actors with shared runtime dependencies; existing Actors keep their state |
+| Previous template allowlist (`SUBSTRATE_PREVIOUS_ACTOR_TEMPLATES`) | Server environment only | Keeps existing Actors usable when the operator selects a new immutable template |
 | Provider rollout | PostHog flag or server environment override | Controls whether the Substrate provider appears in settings |
 | Kubernetes identity, worker images, and template definitions | Server operator | They are not sandbox connection fields |
 | Timeouts and lifecycle policy | Server operator | They control runtime behavior |

@@ -49,6 +49,9 @@ test(
 			atespace: process.env.SUBSTRATE_ATESPACE,
 			template: process.env.SUBSTRATE_ACTOR_TEMPLATE,
 			actorTag: process.env.SUBSTRATE_ACTOR_TAG || undefined,
+			previousTemplates: process.env.SUBSTRATE_PREVIOUS_ACTOR_TEMPLATES?.split(',')
+				.map((name) => name.trim())
+				.filter(Boolean),
 			tokenFile: process.env.SUBSTRATE_TOKEN_FILE,
 			caFile: process.env.SUBSTRATE_CA_FILE,
 			routerCredentialFile: process.env.SUBSTRATE_ROUTER_CREDENTIAL_FILE,
@@ -66,7 +69,7 @@ message ActorRequest { ObjectRef actor = 1; }
 message TemplateRequest { ObjectRef actor_template = 1; }
 message PolicyRequest { ObjectRef actor = 1; string name = 2; }
 message ActorStatus { int32 state = 1; }
-message Actor { ObjectRef source_tag = 4; ActorStatus status = 5; }
+message Actor { ObjectRef actor_template = 2; ObjectRef source_tag = 4; ActorStatus status = 5; }
 message Container { string name = 1; string image = 2; }
 message ActorTemplate { repeated Container containers = 3; }
 message EgressPolicy { repeated EgressRule rules = 2; }
@@ -243,8 +246,8 @@ message AllPorts {}
 		const root = `/home/user/workspace/live-${randomUUID()}`;
 
 		await suite.test(
-			'a prepared seed tag avoids dependency installation during workspace setup',
-			{ skip: !connection.actorTag },
+			'a prepared template or seed tag avoids dependency installation during workspace setup',
+			{ skip: !connection.actorTag && process.env.SUBSTRATE_TEST_PREPARED_TEMPLATE !== '1' },
 			async () => {
 				const { createWorkspace, setupSandboxWorkspace } = fromN8n('@n8n/instance-ai');
 				const workspace = createWorkspace(sandbox);
@@ -259,6 +262,9 @@ message AllPorts {}
 				try {
 					const startedAt = Date.now();
 					await workspace.init();
+					if (process.env.SUBSTRATE_TEST_PREPARED_TEMPLATE === '1') {
+						assert.ok(await filesystem.exists('/home/user/workspace/.n8n-runtime-ready'));
+					}
 					assert.equal(
 						await setupSandboxWorkspace(workspace, {
 							logger: { debug() {}, warn() {}, info() {}, error() {} },
@@ -270,10 +276,43 @@ message AllPorts {}
 					assert.equal(installs, 0);
 					assert.equal(checks, 1);
 					const actor = await rpc('GetActor', 'ActorRequest', 'Actor', { actor: ref(sandbox.id) });
-					assert.deepEqual(actor.sourceTag, ref(connection.actorTag));
+					assert.deepEqual(actor.actorTemplate, ref(connection.template));
+					if (connection.actorTag) assert.deepEqual(actor.sourceTag, ref(connection.actorTag));
 				} finally {
 					sandbox.executeCommand = execute;
 				}
+			},
+		);
+
+		await suite.test(
+			'an operator-approved previous template keeps its files and operation leases',
+			{ skip: !connection.previousTemplates?.length },
+			async () => {
+				const previous = await create({}, true, {
+					...connection,
+					template: connection.previousTemplates[0],
+					actorTag: undefined,
+				});
+				const path = '/home/user/workspace/previous-template-marker';
+				await previous.writeFile(previous.id, path, 'preserved');
+				const reattached = await createSandbox({
+					enabled: true,
+					provider: 'substrate',
+					connection,
+					id: previous.id.slice(4),
+					timeout: 30_000,
+					onOperation: coordinator.createOperationRecorder(connection, {
+						autoStopMinutes: 2,
+						autoDeleteMinutes: 60,
+						ephemeral: false,
+					}),
+				});
+				actors.set(reattached.id, reattached);
+				assert.equal((await reattached.executeCommand('printf', ['reattached'])).exitCode, 0);
+				assert.equal((await reattached.readFile(reattached.id, path)).toString(), 'preserved');
+				const actor = await rpc('GetActor', 'ActorRequest', 'Actor', { actor: ref(reattached.id) });
+				assert.equal(actor.actorTemplate.name, connection.previousTemplates[0]);
+				await suspended(reattached);
 			},
 		);
 

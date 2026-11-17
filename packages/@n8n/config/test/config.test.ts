@@ -388,6 +388,7 @@ describe('GlobalConfig', () => {
 			substrateAtespace: '',
 			substrateTemplate: '',
 			substrateActorTag: '',
+			substratePreviousTemplates: '',
 			substrateTokenFile: '',
 			substrateCaFile: '',
 			substrateRouterCredentialFile: '',

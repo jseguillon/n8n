@@ -118,6 +118,7 @@ export class SubstrateSandbox extends BaseSandbox {
 			options.atespace,
 			options.template,
 			...(options.actorTag ? [options.actorTag] : []),
+			...(options.previousTemplates ?? []),
 		]) {
 			if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value))
 				throw new Error('Substrate identities must be DNS labels');

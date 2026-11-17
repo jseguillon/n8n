@@ -200,6 +200,10 @@ export class InstanceAiConfig {
 	@Env('SUBSTRATE_ACTOR_TAG')
 	substrateActorTag: string = '';
 
+	/** Comma-separated names of previous Substrate ActorTemplates whose existing Actors you want to retain after a template upgrade. Each name must belong to the configured Atespace. When unset, n8n accepts only the current template. */
+	@Env('SUBSTRATE_PREVIOUS_ACTOR_TEMPLATES')
+	substratePreviousTemplates: string = '';
+
 	/** Path to a readable Substrate bearer token file. n8n reads it for each control request and uses it instead of a saved access token. */
 	@Env('SUBSTRATE_TOKEN_FILE')
 	substrateTokenFile: string = '';

@@ -63,6 +63,7 @@ export class SubstrateActorActivityRepository {
 		operationId: string,
 		leaseMs: number,
 		now = new Date(),
+		compatibleFingerprints: readonly string[] = [],
 	): Promise<boolean> {
 		for (;;) {
 			const activity = await this.rows.findOneBy({ actorId: input.actorId });
@@ -83,7 +84,8 @@ export class SubstrateActorActivityRepository {
 				continue;
 			}
 			if (
-				activity.connectionFingerprint !== input.connectionFingerprint ||
+				(activity.connectionFingerprint !== input.connectionFingerprint &&
+					!compatibleFingerprints.includes(activity.connectionFingerprint)) ||
 				claimIsLive(activity, now.getTime())
 			)
 				return false;
@@ -166,11 +168,7 @@ export class SubstrateActorActivityRepository {
 	): Promise<SubstrateActorSuspensionClaim | undefined> {
 		for (;;) {
 			const activity = await this.rows.findOneBy({ actorId });
-			if (
-				!activity ||
-				activity.connectionFingerprint !== fingerprint ||
-				claimIsLive(activity, now.getTime())
-			)
+			if (activity?.connectionFingerprint !== fingerprint || claimIsLive(activity, now.getTime()))
 				return;
 			if (Object.keys(liveOperations(activity, now.getTime())).length > 0) return;
 			// Keep legacy command leases until they expire during an upgrade.
@@ -213,7 +211,7 @@ export class SubstrateActorActivityRepository {
 	async completeClaim(claim: SubstrateActorSuspensionClaim, now = new Date()): Promise<boolean> {
 		for (;;) {
 			const activity = await this.rows.findOneBy({ actorId: claim.actorId });
-			if (!activity || activity.claimToken !== claim.claimToken) return false;
+			if (activity?.claimToken !== claim.claimToken) return false;
 			if (claim.action === 'delete') {
 				const result = await this.rows.delete({
 					actorId: claim.actorId,
@@ -237,7 +235,7 @@ export class SubstrateActorActivityRepository {
 	async releaseClaim(claim: SubstrateActorSuspensionClaim): Promise<void> {
 		for (;;) {
 			const activity = await this.rows.findOneBy({ actorId: claim.actorId });
-			if (!activity || activity.claimToken !== claim.claimToken) return;
+			if (activity?.claimToken !== claim.claimToken) return;
 			if (
 				await this.update(activity, {
 					suspensionClaimedAt: null,

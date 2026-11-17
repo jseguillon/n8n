@@ -24,6 +24,7 @@ Set these server environment variables:
 | `SUBSTRATE_ATESPACE` | Atespace name |
 | `SUBSTRATE_ACTOR_TEMPLATE` | Template name in that Atespace |
 | `SUBSTRATE_ACTOR_TAG` | Optional operator-prepared dependency snapshot tag in the same Atespace and template |
+| `SUBSTRATE_PREVIOUS_ACTOR_TEMPLATES` | Optional comma-separated allowlist of previous template names for existing Actors |
 | `SUBSTRATE_TOKEN_FILE` | Path to a mounted bearer token file |
 | `SUBSTRATE_CA_FILE` | Path to the control API CA bundle |
 | `SUBSTRATE_ROUTER_CREDENTIAL_FILE` | Path to a mounted PodIdentity PEM bundle for router mTLS |
@@ -191,7 +192,13 @@ The Assistant turn also includes model calls, lazy workspace setup, router wake,
 file transfers, and suspension. The first workspace tool initializes workflow
 dependencies even when the requested command is small.
 
-Use `SUBSTRATE_ACTOR_TAG` to seed new Actors from a dependency-only snapshot.
+The companion ActorTemplate installs dependencies through an idempotent
+bootstrap command. It starts the daemon only after validation succeeds. Its
+readiness probe therefore gates the prepared golden snapshot. The image itself
+keeps Node.js and system tools but has no npm workspace installation.
+Leave `SUBSTRATE_ACTOR_TAG` unset to use that golden snapshot.
+
+For a legacy template, use `SUBSTRATE_ACTOR_TAG` to seed new Actors from a dependency-only snapshot.
 The tag must belong to the configured Atespace and ActorTemplate. This setting
 does not change existing Actors or their template checks. An absent or
 incompatible configured tag fails Actor creation. With the setting unset, n8n
@@ -203,6 +210,11 @@ package manifest. Missing or incompatible dependencies use the existing install
 path. Linked-SDK development mode still installs its packages.
 
 See the [preparation and benchmark guide](../../../../docs/substrate-startup-latency.md).
+
+When you select a new immutable template, list approved old names in
+`SUBSTRATE_PREVIOUS_ACTOR_TEMPLATES`. Existing Actors keep their original
+template and state. Both template validation and persisted activity accept only
+the explicit same-Atespace allowlist. Cleanup continues to handle old Actors.
 
 ## Integration test
 
