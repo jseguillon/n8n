@@ -577,7 +577,6 @@ describe('GlobalConfig', () => {
 			timezone: 'America/New_York',
 			releaseChannel: 'dev',
 			gracefulShutdownTimeout: 30,
-			substrateSandboxSuspendDelayMs: 5_000,
 		},
 		license: {
 			serverUrl: 'https://license.n8n.io/v1',

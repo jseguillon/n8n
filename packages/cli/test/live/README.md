@@ -68,7 +68,7 @@ temporary storage and deletes its disposable Actors in cleanup, including after
 a failed step. Cleanup failures fail the suite. No LLM or user credentials are
 needed. The package-root override selects a built runtime, not a database.
 
-Coverage includes actual ATE suspension, grace-period cancellation, parallel
+Coverage includes immediate asynchronous ATE suspension, follow-up wake, parallel
 leases, binary filesystem operations, full download consumption, interrupted
 execution streams, timeout, cancellation, cached-adapter recovery after automatic
 deletion, configured egress, and recovery by a new coordinator without timers.
