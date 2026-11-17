@@ -32,6 +32,35 @@ for ROOTFS. ROOTFS omits packaged process memory but preserves root filesystem
 changes. VOLUMES-only snapshots do not preserve this template's writable
 workspace without a workspace volume. The application template retains MEMORY.
 
+### Prepared snapshot results
+
+The optimized runtime, published by
+[build 44177468310](https://github.com/jseguillon/n8n/actions/runs/44177468310),
+uses image digest
+`sha256:cbdc0340a0f50c12814566f0eff062f8070d7e255506b86ab688d233e1f7b945`.
+Three fresh Actors per template were created from dependency-only durable tags.
+Each Actor then ran five marker-check and `ls` pairs.
+
+| Measurement | MEMORY | ROOTFS |
+| --- | ---: | ---: |
+| Fresh setup, median of three Actors | 3.133 s | 2.847 s |
+| Actor initialization plus fresh setup, median | 3.474 s | 3.062 s |
+| Local dependency check, all fresh samples | 0.775–0.812 s | 0.892–0.933 s |
+| Reused marker check plus `ls`, median of 15 pairs | 0.503 s | 0.422 s |
+| Reused pairs, full observed range | 0.459–0.556 s | 0.382–0.756 s |
+
+Both templates passed all 15 packaged-runtime test records, including actual
+source-tag provenance and zero npm install calls during workspace setup.
+ROOTFS had a modest latency benefit in this same-node test and one noisy warm
+sample group. Dependency preparation removed most of the cold-start cost.
+These are sandbox measurements, not a promise about total Assistant turn time.
+The user thread was not replayed through an LLM.
+
+`preferredFidelity` limits packaged snapshot content. A process resumed in place
+can keep its memory even with ROOTFS preference. The fresh-Actor test above used
+durable tags with confirmed fidelity `3` and `2`, rather than relying only on
+node-local resume behavior.
+
 ## Prepare shared runtime dependencies once
 
 Use a new tag name for each n8n dependency set. The preparation script creates
