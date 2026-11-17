@@ -1,0 +1,86 @@
+# Substrate workspace startup latency
+
+## What each duration means
+
+`executionTimeMs` is command execution inside the sandbox, in milliseconds.
+It is not the command timeout. Assistant turn time also includes model calls,
+context collection, lazy workspace initialization, transport, and lifecycle work.
+The first workspace tool prepares the workflow SDK and workspace files before
+it executes the requested command.
+
+## Measurements on 2026-11-17
+
+The deployed n8n 2.48.0 async-suspend image was tested on Talos with disposable
+Actors. The same daemon image and workspace setup pipeline ran with MEMORY
+and ROOTFS ActorTemplates. The setup fixture used an empty node catalog and
+no user context. These measurements do not include LLM latency.
+
+| Measurement | MEMORY | ROOTFS |
+| --- | ---: | ---: |
+| First workspace setup | 19.405 s | 21.269 s |
+| Dependency installation within setup | 17.430 s | 19.594 s |
+| Reused marker check plus `ls`, five samples | 0.482–0.523 s | 0.385–0.432 s |
+| Daemon `ls` execution, same samples | 8–12 ms | 7–9 ms |
+
+The installed dependency versions in the base image differ from the n8n runtime.
+The runtime requests workflow SDK `0.41.0`; the base image contains `0.36.5`.
+Changing snapshot fidelity does not remove that first-use installation.
+A separate `--prefer-offline` trial still took 14–17 seconds to install.
+
+Prepared test tags confirmed actual snapshot fidelity `3` for MEMORY and `2`
+for ROOTFS. ROOTFS omits packaged process memory but preserves root filesystem
+changes. VOLUMES-only snapshots do not preserve this template's writable
+workspace without a workspace volume. The application template retains MEMORY.
+
+## Prepare shared runtime dependencies once
+
+Use a new tag name for each n8n dependency set. The preparation script creates
+its own Actor from the configured template. It writes only the generated public
+package manifest and installs runtime dependencies. It does not copy an existing
+workspace, user files, context, or the workspace initialization marker.
+
+1. Copy the script into the n8n pod:
+
+   ```sh
+   kubectl -n n8n-app cp packages/cli/test/live/prepare-substrate-dependencies.cjs \
+     <pod>:/tmp/prepare-substrate-dependencies.cjs
+   ```
+
+2. Run it with the pod's mounted Substrate identity:
+
+   ```sh
+   kubectl -n n8n-app exec <pod> -- env \
+     SUBSTRATE_SEED_TAG=n8n-runtime-dependencies-v1 \
+     node /tmp/prepare-substrate-dependencies.cjs
+   ```
+
+The identity needs permission to create tags and manage Actors in the Atespace.
+The script suspends its Actor, creates a durable Atespace-scoped tag, and deletes
+the seed Actor. It does not overwrite an existing tag. It reports dependency
+versions, install time, and the stored snapshot fidelity.
+
+3. Configure the new tag:
+
+   ```sh
+   kubectl -n n8n-app set env deployment/n8n \
+     SUBSTRATE_ACTOR_TAG=n8n-runtime-dependencies-v1
+   kubectl -n n8n-app rollout status deployment/n8n --timeout=5m
+   ```
+
+New Actors use the tag. Existing Actors keep their state and template identity.
+Workspace setup still writes current node catalogs, context-independent guides,
+and build files. It validates the complete installed dependency tree locally.
+Only a matching tree skips npm installation. An older tag falls back to an
+install when n8n requires different dependencies.
+
+Prepare a new tag after changing runtime dependencies. Keep old tags until no
+Actors depend on them. To return to the template's default golden snapshot,
+remove `SUBSTRATE_ACTOR_TAG` from the deployment and restart n8n. This affects
+only subsequent Actor creation.
+
+## Verify a prepared tag
+
+Run the [packaged-runtime live suite](../packages/cli/test/live/README.md) in a
+dedicated test Atespace with `SUBSTRATE_ACTOR_TAG` set to its prepared tag.
+The additional check verifies Actor source-tag provenance, workspace setup,
+and the absence of npm installation. The suite uses its own database and Actors.

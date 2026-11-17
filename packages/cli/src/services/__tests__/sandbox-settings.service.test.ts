@@ -144,6 +144,13 @@ describe('SandboxSettingsService', () => {
 			});
 		});
 
+		it('adds only the operator seed tag to a saved connection', async () => {
+			globalConfig.instanceAi.substrateActorTag = 'runtime-dependencies';
+			await expect(
+				service.getSubstrateConfig({ type: 'substrateApi', data }),
+			).resolves.toMatchObject({ connection: { actorTag: 'runtime-dependencies' } });
+		});
+
 		it.each([
 			{ endpoint: 'https://api.example.test' },
 			{ endpoint: 'api.example.test:70000' },
@@ -155,6 +162,7 @@ describe('SandboxSettingsService', () => {
 			{ serverName: 'unexpected.example.test' },
 			{ egressPolicyFile: '/unexpected/policy.json' },
 			{ egressPolicy: { rules: [] } },
+			{ actorTag: 'unexpected-tag' },
 		])('rejects invalid or server-only fields: %j', async (invalid) => {
 			await expect(
 				service.getSubstrateConfig({ type: 'substrateApi', data: { ...data, ...invalid } }),

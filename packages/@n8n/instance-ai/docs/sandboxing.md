@@ -89,6 +89,13 @@ deletes suspended Actors after their auto-delete interval. It stores Actor
 activity in the n8n database so it works across main processes. Auto-archive
 applies only to Daytona.
 
+The first Substrate workspace tool prepares workflow dependencies before the
+requested operation. A small command can therefore have a much larger first-use
+wall time than its daemon `executionTimeMs`. Configure `SUBSTRATE_ACTOR_TAG` with
+an operator-prepared dependency-only snapshot to reduce this cost. Setup checks
+the complete local dependency tree and skips installation when it matches.
+See the [startup guide](../../../../docs/substrate-startup-latency.md).
+
 ## Thread-Scoped Lifecycle
 
 Each conversation thread has one shared remote sandbox and workspace.

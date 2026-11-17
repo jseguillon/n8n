@@ -196,6 +196,10 @@ export class InstanceAiConfig {
 	@Env('SUBSTRATE_ACTOR_TEMPLATE')
 	substrateTemplate: string = '';
 
+	/** Name of a Substrate snapshot tag to seed new sandbox Actors. Use a tag from the configured Atespace and ActorTemplate with only shared runtime dependencies. When unset, new Actors use the template's golden snapshot. */
+	@Env('SUBSTRATE_ACTOR_TAG')
+	substrateActorTag: string = '';
+
 	/** Path to a readable Substrate bearer token file. n8n reads it for each control request and uses it instead of a saved access token. */
 	@Env('SUBSTRATE_TOKEN_FILE')
 	substrateTokenFile: string = '';

@@ -97,10 +97,11 @@ export function parseSubstrateCredential({ type, data }: SandboxCredential) {
 			'serverName',
 			'egressPolicyFile',
 			'egressPolicy',
+			'actorTag',
 		].some((field) => field in data)
 	) {
 		throw new UnprocessableRequestError(
-			'Substrate TLS trust, router identity, token files and egress policies are managed on the server',
+			'Substrate TLS trust, router identity, token files, egress policies and seed tags are managed on the server',
 		);
 	}
 	if (data.apiToken !== undefined && typeof data.apiToken !== 'string') {
@@ -223,6 +224,7 @@ export class SandboxSettingsService {
 				...(this.config.substrateEgressPolicyFile
 					? { egressPolicyFile: this.config.substrateEgressPolicyFile }
 					: {}),
+				...(this.config.substrateActorTag ? { actorTag: this.config.substrateActorTag } : {}),
 			},
 			timeout: this.config.sandboxTimeout,
 			ephemeral: this.config.sandboxEphemeral,

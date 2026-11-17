@@ -23,6 +23,7 @@ Set these server environment variables:
 | `SUBSTRATE_ROUTER_URL` | Private HTTPS router URL |
 | `SUBSTRATE_ATESPACE` | Atespace name |
 | `SUBSTRATE_ACTOR_TEMPLATE` | Template name in that Atespace |
+| `SUBSTRATE_ACTOR_TAG` | Optional operator-prepared dependency snapshot tag in the same Atespace and template |
 | `SUBSTRATE_TOKEN_FILE` | Path to a mounted bearer token file |
 | `SUBSTRATE_CA_FILE` | Path to the control API CA bundle |
 | `SUBSTRATE_ROUTER_CREDENTIAL_FILE` | Path to a mounted PodIdentity PEM bundle for router mTLS |
@@ -182,6 +183,26 @@ When the variable is unset, n8n makes no egress-policy calls. Substrate denies
 unmatched DNS and outbound traffic, so package downloads need an existing policy
 or a configured default. Egress policy files and rules are server-managed, not
 editable through an n8n credential or the sandbox connection form.
+
+## Startup latency
+
+A command's `executionTimeMs` measures daemon execution, in milliseconds.
+The Assistant turn also includes model calls, lazy workspace setup, router wake,
+file transfers, and suspension. The first workspace tool initializes workflow
+dependencies even when the requested command is small.
+
+Use `SUBSTRATE_ACTOR_TAG` to seed new Actors from a dependency-only snapshot.
+The tag must belong to the configured Atespace and ActorTemplate. This setting
+does not change existing Actors or their template checks. An absent or
+incompatible configured tag fails Actor creation. With the setting unset, n8n
+uses the template's golden snapshot as before.
+
+Substrate workspace setup checks the local dependency tree with `npm ls --all`.
+It skips installation only when the complete tree satisfies the generated
+package manifest. Missing or incompatible dependencies use the existing install
+path. Linked-SDK development mode still installs its packages.
+
+See the [preparation and benchmark guide](../../../../docs/substrate-startup-latency.md).
 
 ## Integration test
 

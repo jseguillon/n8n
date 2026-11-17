@@ -31,6 +31,7 @@ SUBSTRATE_CA_FILE
 SUBSTRATE_ROUTER_CREDENTIAL_FILE
 SUBSTRATE_EGRESS_POLICY_FILE
 SUBSTRATE_SERVER_NAME  # optional; default api.ate-system.svc
+SUBSTRATE_ACTOR_TAG    # optional; prepared tag in the test Atespace and template
 ```
 
 The installation and identities remain externally managed. See the
@@ -88,3 +89,14 @@ is configured. The packaged-runtime suite requires that file for full coverage.
 Without `SUBSTRATE_INTEGRATION_TEST=1`, both suites report skipped tests and
 contact no deployment. With the flag set, missing configuration fails the suite
 instead of silently skipping it. Run only against a dedicated test Atespace.
+
+## Prepared dependency tags
+
+Use [the startup guide](../../../../docs/substrate-startup-latency.md) to prepare
+a tag with `prepare-substrate-dependencies.cjs`. This script creates a new seed
+Actor, installs the n8n runtime's dependency manifest, creates a durable tag, and
+deletes its Actor. It does not copy existing workspaces or set their setup marker.
+
+With `SUBSTRATE_ACTOR_TAG` set, the live suite also verifies source-tag provenance
+and workspace initialization without npm installation. With no tag, that one
+check is explicitly skipped. The remaining lifecycle checks still run.

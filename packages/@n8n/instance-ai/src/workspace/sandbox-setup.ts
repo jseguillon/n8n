@@ -557,6 +557,15 @@ async function installDependencies(
 		// One deadline covers both attempts. The signal stops us waiting; it does not kill
 		// the remote command, which the sandbox collects at its own timeout.
 		const deadline = Date.now() + INSTALL_STEP_BUDGET_MS;
+		if (workspace.sandbox?.provider === 'substrate' && !isLinkWorkspaceSdkEnabled()) {
+			// A prepared snapshot can already contain the full dependency tree.
+			const check = await runInSandbox(
+				workspace,
+				`npm ls --all --silent > /dev/null 2>&1${options.writeMarker ? ` && ${WRITE_MARKER_COMMAND}` : ''}`,
+				{ cwd: root, abortSignal: AbortSignal.timeout(Math.max(1, deadline - Date.now())) },
+			);
+			if (check.exitCode === 0) return;
+		}
 		const install = async (flags: string) =>
 			await runInSandbox(
 				workspace,

@@ -25,6 +25,7 @@ export function substrateSandboxConfig(config: InstanceAiConfig): SubstrateSandb
 		provider: 'substrate',
 		connection: {
 			...connection,
+			...(config.substrateActorTag ? { actorTag: config.substrateActorTag } : {}),
 			...(config.substrateEgressPolicyFile
 				? { egressPolicyFile: config.substrateEgressPolicyFile }
 				: {}),

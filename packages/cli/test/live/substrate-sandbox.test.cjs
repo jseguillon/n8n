@@ -48,6 +48,7 @@ test(
 			routerUrl: process.env.SUBSTRATE_ROUTER_URL,
 			atespace: process.env.SUBSTRATE_ATESPACE,
 			template: process.env.SUBSTRATE_ACTOR_TEMPLATE,
+			actorTag: process.env.SUBSTRATE_ACTOR_TAG || undefined,
 			tokenFile: process.env.SUBSTRATE_TOKEN_FILE,
 			caFile: process.env.SUBSTRATE_CA_FILE,
 			routerCredentialFile: process.env.SUBSTRATE_ROUTER_CREDENTIAL_FILE,
@@ -65,7 +66,7 @@ message ActorRequest { ObjectRef actor = 1; }
 message TemplateRequest { ObjectRef actor_template = 1; }
 message PolicyRequest { ObjectRef actor = 1; string name = 2; }
 message ActorStatus { int32 state = 1; }
-message Actor { ActorStatus status = 5; }
+message Actor { ObjectRef source_tag = 4; ActorStatus status = 5; }
 message Container { string name = 1; string image = 2; }
 message ActorTemplate { repeated Container containers = 3; }
 message EgressPolicy { repeated EgressRule rules = 2; }
@@ -240,6 +241,41 @@ message AllPorts {}
 		const sandbox = await create();
 		const filesystem = createFilesystem(sandbox);
 		const root = `/home/user/workspace/live-${randomUUID()}`;
+
+		await suite.test(
+			'a prepared seed tag avoids dependency installation during workspace setup',
+			{ skip: !connection.actorTag },
+			async () => {
+				const { createWorkspace, setupSandboxWorkspace } = fromN8n('@n8n/instance-ai');
+				const workspace = createWorkspace(sandbox);
+				const execute = sandbox.executeCommand.bind(sandbox);
+				let installs = 0;
+				let checks = 0;
+				sandbox.executeCommand = async (command, ...args) => {
+					if (command.startsWith('npm install')) installs++;
+					if (command.startsWith('npm ls ')) checks++;
+					return await execute(command, ...args);
+				};
+				try {
+					const startedAt = Date.now();
+					await workspace.init();
+					assert.equal(
+						await setupSandboxWorkspace(workspace, {
+							logger: { debug() {}, warn() {}, info() {}, error() {} },
+							nodeService: { listSearchable: async () => [] },
+						}),
+						true,
+					);
+					suite.diagnostic(`Seeded workspace initialization: ${Date.now() - startedAt} ms`);
+					assert.equal(installs, 0);
+					assert.equal(checks, 1);
+					const actor = await rpc('GetActor', 'ActorRequest', 'Actor', { actor: ref(sandbox.id) });
+					assert.deepEqual(actor.sourceTag, ref(connection.actorTag));
+				} finally {
+					sandbox.executeCommand = execute;
+				}
+			},
+		);
 
 		await step(
 			'the final command suspends the Actor before returning without a grace period',

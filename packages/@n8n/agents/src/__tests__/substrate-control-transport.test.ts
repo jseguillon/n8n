@@ -99,6 +99,34 @@ afterEach(() => {
 });
 
 describe('SubstrateControl transport', () => {
+	it.each([undefined, 'runtime-dependencies'])(
+		'creates Actors with the configured seed tag: %s',
+		async (actorTag) => {
+			const protocol = parse(`syntax = "proto3";
+package substrate.ateapi.v1;
+message ObjectRef { string atespace = 1; string name = 2; }
+message ResourceMetadata { string atespace = 1; string name = 2; }
+message Actor { ResourceMetadata metadata = 1; ObjectRef actor_template = 2; ObjectRef source_tag = 4; }
+message CreateActorRequest { Actor actor = 1; }
+`).root;
+			readFile.mockImplementation(async (path: string) =>
+				path.endsWith('ca.crt') ? Buffer.from('ca') : 'token',
+			);
+			await new SubstrateControl({ ...connection, actorTag }, 1_000).call(
+				'CreateActor',
+				'n8n-test',
+			);
+			const request = makeUnaryRequest.mock.calls[0][0];
+			const type = protocol.lookupType('substrate.ateapi.v1.CreateActorRequest');
+			expect(type.toObject(type.decode(request.serialize(request.request)))).toEqual({
+				actor: {
+					metadata: { atespace: 'test-space', name: 'n8n-test' },
+					actorTemplate: { atespace: 'test-space', name: 'test-template' },
+					...(actorTag ? { sourceTag: { atespace: 'test-space', name: actorTag } } : {}),
+				},
+			});
+		},
+	);
 	it.each(['ca', 'token'])(
 		'reports a server %s file error without returning its path',
 		async (file) => {
