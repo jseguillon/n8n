@@ -274,7 +274,7 @@ message CreateActorEgressPolicyRequest { ObjectRef actor = 1; EgressPolicy egres
 		});
 	});
 
-	it('suspends with synchronous snapshot durability', async () => {
+	it('suspends with asynchronous snapshot durability', async () => {
 		const protocol = parse(`syntax = "proto3";
 package substrate.ateapi.v1;
 message ObjectRef { string atespace = 1; string name = 2; }
@@ -302,7 +302,7 @@ message SuspendActorRequest { ObjectRef actor = 1; SuspendOptions options = 2; }
 			protocol.lookupType('substrate.ateapi.v1.SuspendActorRequest').toObject(decoded),
 		).toMatchObject({
 			actor: { atespace: 'test-space', name: 'n8n-workspace' },
-			options: { mode: 1 },
+			options: { mode: 2 },
 		});
 	});
 });

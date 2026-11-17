@@ -156,7 +156,7 @@ export class SubstrateControl {
 							},
 						}
 					: method === 'SuspendActor'
-						? { actor: ref, options: { mode: 1 } }
+						? { actor: ref, options: { mode: 2 } }
 						: { actor: ref };
 		try {
 			return await new Promise<unknown>((resolve, reject) => {

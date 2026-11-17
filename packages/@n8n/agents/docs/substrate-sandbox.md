@@ -68,18 +68,23 @@ UI connection. The server-owned file and TLS settings are never credential data.
 
 ## Lifecycle
 
-`stop()` synchronously suspends persistent Actors and waits for a durable
-snapshot. It deletes ephemeral Actors. A router request can wake a suspended
+`stop()` suspends persistent Actors with asynchronous durability (mode `2`).
+The RPC returns after the node-local checkpoint. atelet uploads the snapshot
+to object storage in the background. Synchronous durability (mode `1`) also
+waits for that upload to complete. Until the upload completes, the latest
+checkpoint depends on the node that holds it. See the
+[Substrate v1 API](https://github.com/agent-substrate/substrate/blob/v1.0.0/api/ateapi/v1/ateapi.proto).
+`stop()` deletes ephemeral Actors. A router request can wake a suspended
 Actor and restore its state. `destroy()` deletes it.
 Verification workspaces are deleted after the probe.
 Agent workspaces use the existing project, Agent, and principal identity.
 Assistant workspaces use a thread-derived identity.
 n8n records Substrate Actor activity in its database. When automatic suspension
-is enabled, n8n records completion immediately and sets a separate suspension
-deadline after the final command or file operation finishes. The delay defaults
-to 5 seconds. A new operation cancels the deadline and starts a new grace period
-when that operation finishes. n8n then suspends a persistent Actor or deletes an
-ephemeral Actor without keeping a snapshot.
+is enabled, n8n requests suspension as soon as the final command or file
+operation finishes, fails, or times out. There is no pre-suspend timer or grace
+period. n8n waits for the asynchronous suspend RPC to return before it releases
+the database claim. It does not wait for the upload to object storage.
+n8n deletes an ephemeral Actor without keeping a snapshot.
 Each operation has its own persisted lease. File reads hold their lease until
 the response body is consumed. Cleanup claims use a database revision and a
 unique owner token. Duplicate completions cannot release another operation's
@@ -119,9 +124,8 @@ suspension. Set an auto-delete value to a negative number to keep suspended
 Actor files. Set it to `0` to delete an Actor when it is suspended. Daytona
 auto-archive does not apply to Substrate.
 
-Set `N8N_SUBSTRATE_SANDBOX_SUSPEND_DELAY_MS` to change the command suspend delay
-in milliseconds. Set it to `0` to suspend or delete an Actor as soon as its final
-command exits or times out.
+`N8N_SUBSTRATE_SANDBOX_SUSPEND_DELAY_MS` no longer applies. n8n always requests
+suspension immediately after the final operation.
 
 The ActorTemplate router target must match the daemon listen port and prepare
 `/home/user/workspace`. Commands run under the daemon's configured user.

@@ -179,7 +179,6 @@ message AllPorts {}
 		process.env.DB_SQLITE_POOL_SIZE = '4';
 		process.env.N8N_LOG_LEVEL = 'silent';
 		const { Container } = fromN8n('@n8n/di');
-		const { GlobalConfig } = fromN8n('@n8n/config');
 		const { DbConnection, SubstrateActorActivityRepository } = fromN8n('@n8n/db');
 		const { createSandbox, createFilesystem } = fromN8n('@n8n/agents/sandbox');
 		const { SubstrateControl } = agentsRequire('./substrate-control.js');
@@ -191,15 +190,13 @@ message AllPorts {}
 		const warnings = [];
 		await database.init();
 		await database.migrate();
-		const config = Container.get(GlobalConfig);
-		config.generic.substrateSandboxSuspendDelayMs = 5_000;
 		const repository = Container.get(SubstrateActorActivityRepository);
 		const settings = {
 			getProvider: () => 'substrate',
 			getSubstrateConfig: async () => ({ connection }),
 		};
 		const logger = { warn: () => warnings.push('Actor cleanup failed') };
-		const coordinator = new SubstrateActorLifecycleService(repository, settings, logger, config);
+		const coordinator = new SubstrateActorLifecycleService(repository, settings, logger);
 		resources.coordinator = coordinator;
 		async function create(policyOverride = {}, tracked = true, actorConnection = connection) {
 			const actor = await createSandbox({
@@ -244,19 +241,18 @@ message AllPorts {}
 		const filesystem = createFilesystem(sandbox);
 		const root = `/home/user/workspace/live-${randomUUID()}`;
 
-		await step('command results precede the grace period and actual suspension', async () => {
-			const result = await sandbox.executeCommand('printf', ['live-ready']);
-			assert.equal(result.exitCode, 0);
-			assert.equal(result.stdout.trim(), 'live-ready');
-			const completed = Date.now();
-			assert.ok((await idle(sandbox)).suspendAfter.getTime() - completed > 4_000);
-			assert.equal(await state(sandbox.id), 2);
-			await wait(2_500);
-			assert.equal(await state(sandbox.id), 2);
-			await suspended(sandbox);
-			assert.ok(Date.now() - completed >= 4_800);
-		});
-		await step('follow-up work cancels the old deadline', async () => {
+		await step(
+			'the final command suspends the Actor before returning without a grace period',
+			async () => {
+				const result = await sandbox.executeCommand('printf', ['live-ready']);
+				assert.equal(result.exitCode, 0);
+				assert.equal(result.stdout.trim(), 'live-ready');
+				assert.equal((await idle(sandbox)).suspendAfter, null);
+				assert.equal(await state(sandbox.id), 4);
+				await suspended(sandbox);
+			},
+		);
+		await step('follow-up work wakes the Actor and holds a lease until completion', async () => {
 			assert.equal((await sandbox.executeCommand('printf', ['follow-up'])).exitCode, 0);
 			await wait(1_000);
 			const execution = sandbox.executeCommand('sleep', ['8']);
@@ -387,6 +383,7 @@ message AllPorts {}
 			});
 			assert.equal(result.timedOut, true);
 			assert.equal(result.success, false);
+			assert.equal(await state(sandbox.id), 4);
 			await idle(sandbox);
 			await wait(2_500);
 			assert.equal(await filesystem.exists(marker), false);
@@ -477,12 +474,7 @@ message AllPorts {}
 				1_000,
 				new Date(Date.now() - 120_000),
 			);
-			await new SubstrateActorLifecycleService(
-				repository,
-				settings,
-				logger,
-				config,
-			).cleanupIdleActors();
+			await new SubstrateActorLifecycleService(repository, settings, logger).cleanupIdleActors();
 			await suspended(orphan);
 		});
 		await step('unset default policy does not implicitly permit egress', async () => {
