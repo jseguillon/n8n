@@ -75,6 +75,7 @@ import type { BuilderTemplatesBundle } from '../builder-templates-service';
 import type { SandboxWorkspace } from '../sandbox-fs';
 import {
 	isSandboxWorkspaceInitialized,
+	NPM_INSTALL_FLAGS_REFRESH_METADATA,
 	setupSandboxWorkspace,
 	type formatNodeCatalogLine as formatNodeCatalogLineFunction,
 } from '../sandbox-setup';
@@ -144,7 +145,7 @@ function mockDaytonaExecuteCommand(command: string): {
 function createFilesystemWorkspace(
 	writeFile: Mock<(...args: [string, string | Buffer, { recursive?: boolean }?]) => Promise<void>>,
 	mkdir?: Mock<(...args: [string, { recursive?: boolean }?]) => Promise<void>>,
-	sandboxProvider: 'daytona' | 'n8n-sandbox' = 'daytona',
+	sandboxProvider: 'daytona' | 'n8n-sandbox' | 'substrate' = 'daytona',
 ): SandboxWorkspace {
 	return {
 		filesystem: {
@@ -368,6 +369,53 @@ describe('setupSandboxWorkspace', () => {
 		vi.doUnmock('../sandbox-fs');
 		vi.resetModules();
 		packWorkspaceSdkMockState.isEnabled = false;
+	});
+
+	it('reuses a complete Substrate dependency tree and writes the marker without installing', async () => {
+		const runInSandbox: RunInSandboxMock = vi.fn();
+		runInSandbox.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+		const readFileViaSandbox: ReadFileViaSandboxMock = vi.fn();
+		readFileViaSandbox.mockResolvedValue(null);
+		const setup = loadSetupSandboxWorkspaceWithFsMocks(runInSandbox, readFileViaSandbox);
+		const workspace = createFilesystemWorkspace(
+			vi.fn(async () => {}),
+			undefined,
+			'substrate',
+		);
+
+		await expect(setup(workspace, createSetupContext())).resolves.toBe(true);
+
+		expect(installCommandsFrom(runInSandbox)).toEqual([]);
+		expect(
+			runInSandbox.mock.calls.some(
+				([, command]) =>
+					command.startsWith('npm ls --all') &&
+					command.includes('&& date') &&
+					command.includes('.sandbox-initialized'),
+			),
+		).toBe(true);
+	});
+
+	it('installs Substrate dependencies when the local tree is missing or incompatible', async () => {
+		const runInSandbox: RunInSandboxMock = vi.fn(async (_workspace, command) => ({
+			exitCode: command.startsWith('npm ls ') ? 1 : 0,
+			stdout: '',
+			stderr: '',
+		}));
+		const readFileViaSandbox: ReadFileViaSandboxMock = vi.fn();
+		readFileViaSandbox.mockResolvedValue(null);
+		const setup = loadSetupSandboxWorkspaceWithFsMocks(runInSandbox, readFileViaSandbox);
+		const workspace = createFilesystemWorkspace(
+			vi.fn(async () => {}),
+			undefined,
+			'substrate',
+		);
+
+		await expect(setup(workspace, createSetupContext())).resolves.toBe(true);
+
+		expect(installCommandsFrom(runInSandbox)).toEqual([
+			`npm install ${NPM_INSTALL_FLAGS_REFRESH_METADATA}`,
+		]);
 	});
 
 	it('writes the initialized marker in the same command as a successful npm install', async () => {

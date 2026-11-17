@@ -113,7 +113,12 @@ export class SubstrateSandbox extends BaseSandbox {
 	constructor(private readonly options: SubstrateSandboxOptions) {
 		super();
 		this.id = `n8n-${options.id ?? randomUUID()}`;
-		for (const value of [this.id, options.atespace, options.template]) {
+		for (const value of [
+			this.id,
+			options.atespace,
+			options.template,
+			...(options.actorTag ? [options.actorTag] : []),
+		]) {
 			if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value))
 				throw new Error('Substrate identities must be DNS labels');
 		}

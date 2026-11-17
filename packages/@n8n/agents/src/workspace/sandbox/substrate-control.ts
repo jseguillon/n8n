@@ -7,6 +7,8 @@ export interface SubstrateConnection {
 	routerUrl: string;
 	atespace: string;
 	template: string;
+	/** Optional operator-prepared snapshot used only when an Actor is created. */
+	actorTag?: string;
 	tokenFile: string;
 	/** Static bearer credential. A server-mounted token file takes precedence. */
 	token?: string;
@@ -59,7 +61,7 @@ const PROTOCOL = `syntax = "proto3";
 package ${API_PACKAGE};
 message ObjectRef { string atespace = 1; string name = 2; }
 message ResourceMetadata { string atespace = 1; string name = 2; }
-message Actor { ResourceMetadata metadata = 1; ObjectRef actor_template = 2; }
+message Actor { ResourceMetadata metadata = 1; ObjectRef actor_template = 2; ObjectRef source_tag = 4; }
 message CreateActorRequest { Actor actor = 1; }
 message GetActorRequest { ObjectRef actor = 1; }
 enum DurabilityMode {
@@ -146,7 +148,13 @@ export class SubstrateControl {
 		const type = schema.lookupType(`${API_PACKAGE}.${requestType}`);
 		const request =
 			method === 'CreateActor'
-				? { actor: { metadata: ref, actorTemplate: { atespace: c.atespace, name: c.template } } }
+				? {
+						actor: {
+							metadata: ref,
+							actorTemplate: { atespace: c.atespace, name: c.template },
+							...(c.actorTag ? { sourceTag: { atespace: c.atespace, name: c.actorTag } } : {}),
+						},
+					}
 				: method === 'CreateActorEgressPolicy'
 					? {
 							actor: ref,

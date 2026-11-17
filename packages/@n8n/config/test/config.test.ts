@@ -383,6 +383,7 @@ describe('GlobalConfig', () => {
 			substrateRouterUrl: '',
 			substrateAtespace: '',
 			substrateTemplate: '',
+			substrateActorTag: '',
 			substrateTokenFile: '',
 			substrateCaFile: '',
 			substrateRouterCredentialFile: '',
