@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'feat/substrate-ghcr-publish'
+      - 'feat/substrate-ghcr-publish-startup-latency'
 
 permissions:
   contents: read
