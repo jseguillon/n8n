@@ -10,7 +10,7 @@ const { setTimeout: wait } = require('node:timers/promises');
 const { isDeepStrictEqual } = require('node:util');
 
 const PUBLISHED_SANDBOX_IMAGE =
-	'ghcr.io/jseguillon/n8n-sandbox-service-substrate@sha256:cfb59a6a2bcea0d185ffa2f5f52ee572c548b996979886d6246d557f4089ecd4';
+	'ghcr.io/jseguillon/n8n-sandbox-service-substrate@sha256:9db537a8246e92825e842ba1d251ce44c10df4e619d74bd993c36e739a4d264f';
 
 test(
 	'packaged n8n Substrate integration',

@@ -10,7 +10,7 @@ ActorTemplates, or an existing Actor's egress policy.
 - An existing ActorTemplate with a daemon wakeup probe and workspace at
   `/home/user/workspace`.
 - The published sandbox image:
-  `ghcr.io/jseguillon/n8n-sandbox-service-substrate@sha256:cfb59a6a2bcea0d185ffa2f5f52ee572c548b996979886d6246d557f4089ecd4`.
+  `ghcr.io/jseguillon/n8n-sandbox-service-substrate@sha256:9db537a8246e92825e842ba1d251ce44c10df4e619d74bd993c36e739a4d264f`.
 - Readable Control API token, CA, and router mTLS files. Use the same identity
   configuration as n8n. Do not put their contents in command arguments.
 - A default egress policy that permits `registry.npmjs.org:443`. Use the
@@ -109,3 +109,13 @@ readiness marker and verifies that n8n does not run npm install. With an approve
 previous-template allowlist, a separate check creates an Actor on the old
 template and verifies reattachment, preserved files, and operation coordination
 under the new configuration. The test does not move or mutate existing Actors.
+
+## Fidelity benchmark
+
+`substrate-fidelity-benchmark.cjs` compares prepared templates without LLM calls.
+It requires explicit opt-in, `SUBSTRATE_BENCH_ATESPACE`, and a comma-separated
+`SUBSTRATE_BENCH_TEMPLATES` list. Defaults are three fresh Actors per template
+and five warm marker-check/command pairs per Actor. Use the same durable
+workspace layout across modes when comparing MEMORY, ROOTFS, and VOLUMES.
+See the [recorded comparison](../../../../docs/substrate-startup-latency.md#template-bootstrap-comparison-2026-11-19)
+for the exact deployment, measurements, and invocation.
