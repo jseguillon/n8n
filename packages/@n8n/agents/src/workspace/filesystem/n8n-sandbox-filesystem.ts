@@ -70,7 +70,8 @@ export class N8nSandboxFilesystem extends BaseFilesystem {
 
 	async writeFile(path: string, content: FileContent, options?: WriteOptions): Promise<void> {
 		await this.withSandbox(options?.abortSignal, async (client, sandboxId) => {
-			if (options?.recursive) {
+			// The Substrate daemon creates parents in the write request.
+			if (options?.recursive && !(this.sandbox instanceof SubstrateSandbox)) {
 				const parent = getParentDirectory(path);
 				if (parent) {
 					await client.mkdir(sandboxId, parent, true);

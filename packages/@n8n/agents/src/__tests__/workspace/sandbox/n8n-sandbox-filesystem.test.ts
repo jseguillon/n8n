@@ -91,6 +91,28 @@ describe('N8nSandboxFilesystem', () => {
 		);
 	});
 
+	it('uses one Substrate write request for recursive writes and preserves explicit mkdir', async () => {
+		const { filesystem, sandbox } = createSubstrateFilesystem();
+		const signal = AbortSignal.timeout(1_000);
+		const mkdir = vi.spyOn(sandbox, 'mkdir').mockResolvedValue();
+		const write = vi.spyOn(sandbox, 'writeFile').mockResolvedValue();
+		await filesystem.writeFile('/workspace/nested/file.txt', 'hello', {
+			recursive: true,
+			overwrite: false,
+			abortSignal: signal,
+		});
+		expect(mkdir).not.toHaveBeenCalled();
+		expect(write).toHaveBeenCalledWith(
+			sandbox.id,
+			'/workspace/nested/file.txt',
+			'hello',
+			false,
+			signal,
+		);
+		await filesystem.mkdir('/workspace/empty', { recursive: true, abortSignal: signal });
+		expect(mkdir).toHaveBeenCalledWith(sandbox.id, '/workspace/empty', true, signal);
+	});
+
 	it('returns string content when readFile is called with utf8 encoding', async () => {
 		const filesystem = createFilesystem();
 
