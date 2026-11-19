@@ -8,6 +8,7 @@ import {
 import { Logger } from '@n8n/backend-common';
 import { SubstrateActorActivityRepository, type SubstrateActorActivityInput } from '@n8n/db';
 import { Service } from '@n8n/di';
+import { runSerially } from '@n8n/utils/run-serially';
 
 import { SandboxSettingsService } from './sandbox-settings.service';
 
@@ -33,6 +34,8 @@ function connectionFingerprint(connection: SubstrateSandboxConfig['connection'])
 
 @Service()
 export class SubstrateActorLifecycleService {
+	private readonly operationUpdates = new Map<string, Promise<unknown>>();
+
 	constructor(
 		private readonly activityRepository: SubstrateActorActivityRepository,
 		private readonly sandboxSettingsService: SandboxSettingsService,
@@ -48,31 +51,47 @@ export class SubstrateActorLifecycleService {
 			connectionFingerprint({ ...connection, template }),
 		);
 		return async (actorId, operationId, phase, timeoutMs, abortSignal) => {
+			// Parallel transfers must not compete to update the same activity row.
 			if (phase === 'started') {
-				abortSignal?.throwIfAborted();
-				const input: SubstrateActorActivityInput = {
-					actorId,
-					connectionFingerprint: fingerprint,
-					...policy,
-				};
-				if (previousFingerprints.length > 0) {
+				return await runSerially(this.operationUpdates, actorId, async () => {
+					abortSignal?.throwIfAborted();
+					const input: SubstrateActorActivityInput = {
+						actorId,
+						connectionFingerprint: fingerprint,
+						...policy,
+					};
+					if (previousFingerprints.length > 0) {
+						return await this.activityRepository.startOperation(
+							input,
+							operationId,
+							timeoutMs + 60_000,
+							undefined,
+							previousFingerprints,
+						);
+					}
 					return await this.activityRepository.startOperation(
 						input,
 						operationId,
 						timeoutMs + 60_000,
-						undefined,
-						previousFingerprints,
 					);
-				}
-				return await this.activityRepository.startOperation(input, operationId, timeoutMs + 60_000);
+				});
 			}
 			if (phase === 'heartbeat')
-				return await this.activityRepository.heartbeatOperation(
+				return await runSerially(
+					this.operationUpdates,
 					actorId,
-					operationId,
-					timeoutMs + 60_000,
+					async () =>
+						await this.activityRepository.heartbeatOperation(
+							actorId,
+							operationId,
+							timeoutMs + 60_000,
+						),
 				);
-			const deadline = await this.activityRepository.finishOperation(actorId, operationId, 0);
+			const deadline = await runSerially(
+				this.operationUpdates,
+				actorId,
+				async () => await this.activityRepository.finishOperation(actorId, operationId, 0),
+			);
 			if (deadline) await this.reclaim(actorId, connection);
 			return true;
 		};

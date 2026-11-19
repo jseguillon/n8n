@@ -75,6 +75,93 @@ describe('Substrate Actor coordinator', () => {
 		expect(sandbox.stop).toHaveBeenCalledOnce();
 	});
 
+	it('serializes updates for one Actor across independent recorders and keeps distinct leases', async () => {
+		let release!: (value: boolean) => void;
+		repository.startOperation.mockReturnValueOnce(
+			new Promise<boolean>((resolve) => {
+				release = resolve;
+			}),
+		);
+		const firstRecorder = service.createOperationRecorder(connection, policy);
+		const secondRecorder = service.createOperationRecorder(connection, policy);
+		const first = firstRecorder('n8n-test', 'first', 'started', 60_000);
+		const second = secondRecorder('n8n-test', 'second', 'started', 60_000);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(repository.startOperation).toHaveBeenCalledOnce();
+		release(true);
+		await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
+		expect(repository.startOperation.mock.calls.map(([, operationId]) => operationId)).toEqual([
+			'first',
+			'second',
+		]);
+	});
+
+	it('allows a different Actor to progress while one Actor update is pending', async () => {
+		let release!: (value: boolean) => void;
+		repository.startOperation.mockReturnValueOnce(
+			new Promise<boolean>((resolve) => {
+				release = resolve;
+			}),
+		);
+		const recorder = service.createOperationRecorder(connection, policy);
+		const first = recorder('n8n-slow', 'first', 'started', 60_000);
+		await expect(recorder('n8n-fast', 'second', 'started', 60_000)).resolves.toBe(true);
+		release(true);
+		await first;
+	});
+
+	it('continues queued updates after a bookkeeping failure', async () => {
+		repository.startOperation.mockRejectedValueOnce(new Error('database unavailable'));
+		const recorder = service.createOperationRecorder(connection, policy);
+		const failed = expect(recorder('n8n-test', 'first', 'started', 60_000)).rejects.toThrow(
+			'database unavailable',
+		);
+		const second = recorder('n8n-test', 'second', 'started', 60_000);
+		await failed;
+		await expect(second).resolves.toBe(true);
+	});
+
+	it('does not acquire a lease for an operation cancelled while queued', async () => {
+		let release!: (value: boolean) => void;
+		repository.startOperation.mockReturnValueOnce(
+			new Promise<boolean>((resolve) => {
+				release = resolve;
+			}),
+		);
+		const recorder = service.createOperationRecorder(connection, policy);
+		const controller = new AbortController();
+		const first = recorder('n8n-test', 'first', 'started', 60_000);
+		const second = recorder('n8n-test', 'cancelled', 'started', 60_000, controller.signal);
+		const cancelled = expect(second).rejects.toMatchObject({ name: 'AbortError' });
+		await vi.advanceTimersByTimeAsync(0);
+		controller.abort();
+		release(true);
+		await first;
+		await cancelled;
+		expect(repository.startOperation).toHaveBeenCalledOnce();
+	});
+
+	it('does not hold the update queue while waiting for the suspend RPC', async () => {
+		let complete!: () => void;
+		sandbox.stop.mockReturnValue(
+			new Promise<void>((resolve) => {
+				complete = resolve;
+			}),
+		);
+		const recorder = service.createOperationRecorder(connection, policy);
+		const finished = recorder('n8n-test', 'finished', 'finished', 60_000);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(sandbox.stop).toHaveBeenCalledOnce();
+		const controller = new AbortController();
+		controller.abort();
+		await expect(
+			recorder('n8n-test', 'cancelled', 'started', 60_000, controller.signal),
+		).rejects.toMatchObject({ name: 'AbortError' });
+		expect(repository.startOperation).not.toHaveBeenCalled();
+		complete();
+		await finished;
+	});
+
 	it('accepts only fingerprints derived from operator-approved previous templates', async () => {
 		await service.createOperationRecorder(connection, policy)('n8n-test', 'old', 'started', 60_000);
 		const oldFingerprint = repository.startOperation.mock.calls[0][0].connectionFingerprint;
