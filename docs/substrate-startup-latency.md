@@ -98,6 +98,77 @@ can keep its memory even with ROOTFS preference. The fresh-Actor test above used
 durable tags with confirmed fidelity `3` and `2`, rather than relying only on
 node-local resume behavior.
 
+## Template-bootstrap comparison: 2026-11-19
+
+The finished template-driven deployment uses:
+
+- n8n image: `ghcr.io/jseguillon/n8n@sha256:288303c4a3ce100806d4b64e86c0bab013fd2200554d8d34446532361e4b6cbc`.
+- Dependency-free sandbox image: `ghcr.io/jseguillon/n8n-sandbox-service-substrate@sha256:9db537a8246e92825e842ba1d251ce44c10df4e619d74bd993c36e739a4d264f`.
+- Application template: `n8n-sandbox-bootstrap`, with MEMORY preference.
+- Previous-template allowlist: `n8n-sandbox`. The seven application Actors remain suspended on their existing templates.
+- No manually configured seed tag. New Actors use the template's golden snapshot.
+
+The [n8n build](https://github.com/jseguillon/n8n/actions/runs/44184122402)
+and [sandbox build](https://github.com/jseguillon/n8n-sandbox-service-substrate/actions/runs/44182458282)
+passed. Image smoke checks verified the absence of workspace npm dependencies
+and global TypeScript. Bootstrap tests covered idempotence, file preservation,
+and failure before readiness. Live suites passed all 16 test records for each
+of MEMORY, ROOTFS, and VOLUMES, including compatibility with previous templates.
+
+The fidelity benchmark used the same image, bootstrap, CPU, memory limit, and
+durable workspace volume for all three modes. Only `preferredFidelity` changed.
+Each mode used three fresh Actors and 15 reused marker-check and `ls` pairs.
+The fixture used an empty node catalog and no LLM or user context.
+
+| Median measurement | MEMORY | ROOTFS | VOLUMES |
+| --- | ---: | ---: | ---: |
+| Actor initialization | 619 ms | 395 ms | 345 ms |
+| Fresh workspace setup | 4.191 s | 5.642 s | 3.904 s |
+| Initialization plus setup | 4.810 s | 6.037 s | 4.458 s |
+| Reused `ls`, complete command call | 357 ms | 373 ms | 308 ms |
+| Marker check plus complete command call | 717 ms | 773 ms | 609 ms |
+| Daemon `ls` execution | 9 ms | 7 ms | 8 ms |
+
+No benchmark setup invoked npm installation. Reused command-call ranges were
+315–531 ms for MEMORY, 319–693 ms for ROOTFS, and 279–338 ms for VOLUMES.
+All three golden tags had completed durable snapshots with their requested
+fidelity. VOLUMES was fastest in this small same-node sample. ROOTFS was noisy
+and did not show a consistent benefit over MEMORY. These measurements do not
+establish multi-node restoration performance or total Assistant turn latency.
+
+VOLUMES requires a durable volume. The first no-volume VOLUMES trial failed
+snapshot creation with `no durable-dir volumes found for VOLUMES snapshot`.
+For the comparison, each template declared `workspace` with `durableDir: {}`
+and mounted it at `/home/user/workspace`. This kept the comparison layout equal
+and preserved workspace files in every mode. VOLUMES does not preserve other
+writable filesystem paths or process memory. The application retains MEMORY
+and its original full-state behavior.
+
+The snapshot store was increased from 1 GiB to 4 GiB after the test fixtures
+filled it. Its requested Longhorn replica count was corrected from three to
+one, matching the single healthy replica on this single-node cluster. All
+disposable Actors, templates, tags, and the benchmark Atespace were deleted.
+
+### Reproduce the comparison
+
+Create three disposable templates with the same bootstrap and durable workspace
+layout. Select a different `preferredFidelity` for each. Wait for all golden
+tags to become ready. Copy `packages/cli/test/live/substrate-fidelity-benchmark.cjs`
+into the test pod and run:
+
+```sh
+kubectl -n n8n-app exec <pod> -- env \
+  SUBSTRATE_INTEGRATION_TEST=1 \
+  SUBSTRATE_BENCH_ATESPACE=<isolated-test-atespace> \
+  SUBSTRATE_BENCH_TEMPLATES=compare-memory,compare-rootfs,compare-volumes \
+  node /tmp/substrate-fidelity-benchmark.cjs
+```
+
+The script uses a temporary database and disposable Actors. It requires the
+template readiness marker, checks preserved setup markers, asserts zero npm
+install calls, and prints timing samples and medians. It deletes its Actors
+and temporary database. The operator removes the test templates and Atespace.
+
 ## Optional: prepare a tag for a legacy template
 
 The primary approach above uses the template's own golden snapshot. This

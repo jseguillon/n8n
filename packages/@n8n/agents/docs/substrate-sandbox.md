@@ -100,7 +100,8 @@ the Control API. A missing file does not recreate an existing Actor. When the
 Actor is gone, concurrent requests share one recreation and retry once. A command
 can retry this way only if its submission was rejected with HTTP 404. An accepted
 or started execution is never resubmitted because replay failed. A recreated
-Actor starts empty. Assistant checks the workspace initialization marker again
+Actor starts from its prepared runtime without the previous user files.
+Assistant checks the workspace initialization marker again
 and reruns setup before reusing its cached workspace.
 
 A cluster-leader task runs once per hour as a recovery check for Actors whose
