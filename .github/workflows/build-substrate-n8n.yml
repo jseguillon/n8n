@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'feat/substrate-ghcr-publish'
+      - 'feat/substrate-ghcr-publish-isolation-file-io'
 
 permissions:
   contents: read
