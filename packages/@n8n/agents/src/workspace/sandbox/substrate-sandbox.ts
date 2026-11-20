@@ -10,7 +10,7 @@ import type {
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as wait } from 'node:timers/promises';
 // eslint-disable-next-line n8n-local-rules/no-uncentralized-http -- The Substrate router requires mTLS, which backend-network does not expose.
-import { Agent } from 'undici';
+import { Agent, type RequestInit as UndiciRequestInit } from 'undici';
 import { z } from 'zod';
 
 import { BaseSandbox } from './base-sandbox';
@@ -196,15 +196,14 @@ export class SubstrateSandbox extends BaseSandbox {
 		const headers = new Headers(init.headers);
 		headers.set('ate-target-actor', `${this.options.atespace}/${this.id}`);
 		const dispatcher = await this.getRouterAgent(url);
-		const response = await fetch(url, {
+		const requestInit: RequestInit & Pick<UndiciRequestInit, 'dispatcher'> = {
 			...init,
 			redirect: 'error',
 			headers,
 			signal: init.signal ?? AbortSignal.timeout(this.timeout),
-			// Node's fetch accepts the Undici dispatcher option for mTLS.
-			// @ts-expect-error dispatcher is a Node fetch extension
 			dispatcher,
-		});
+		};
+		const response = await fetch(url, requestInit);
 		if (!response.ok) {
 			await response.body?.cancel();
 			throw new SandboxServiceError(
