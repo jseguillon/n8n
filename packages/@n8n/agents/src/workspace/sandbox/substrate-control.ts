@@ -121,6 +121,7 @@ export class SubstrateControl {
 		const protobuf = protobufjs.default ?? protobufjs;
 		const schema = (protocol ??= protobuf.parse(PROTOCOL).root);
 		const c = this.connection;
+		// Projected tokens can rotate while the sandbox remains cached. Read them for each RPC.
 		const [ca, token] = await Promise.all([
 			c.caFile
 				? readFile(c.caFile).catch(() => {

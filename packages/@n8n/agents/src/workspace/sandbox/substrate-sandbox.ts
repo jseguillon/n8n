@@ -234,6 +234,7 @@ export class SubstrateSandbox extends BaseSandbox {
 					throw new Error('The server Substrate router credential file could not be read');
 				}),
 			]);
+			// Reuse connections only while the mounted trust and client identity remain unchanged.
 			const fingerprint = createHash('sha256').update(ca).update(credentialBundle).digest('hex');
 			if (this.routerAgent && this.routerAgentFingerprint === fingerprint) return this.routerAgent;
 
@@ -321,6 +322,7 @@ export class SubstrateSandbox extends BaseSandbox {
 						? rejected
 						: recovery === 'command' && error instanceof SubstrateCommandNotStartedError;
 				if (!retryable || signal.aborted) throw error;
+				// A missing file does not mean the Actor is gone. Another request may also have recovered it.
 				const missing = generation !== this.generation || (await this.isActorMissing());
 				if (!missing && generation === this.generation) throw error;
 				await this.recoverActor(generation, signal);
@@ -455,6 +457,7 @@ export class SubstrateSandbox extends BaseSandbox {
 				}
 			};
 
+			// Reuse the execution ID on submission retries so a lost response cannot start a second command.
 			const postBody = JSON.stringify({
 				command: toShellCommand(command, args),
 				env: options?.env,
@@ -498,6 +501,7 @@ export class SubstrateSandbox extends BaseSandbox {
 				resumeAttempts++;
 				await wait(EXECUTION_RESUME_DELAY_MS, undefined, { signal });
 				const query: Record<string, string> = { follow: 'true' };
+				// Resume the existing execution after the last event instead of submitting it again.
 				if (lastSeq >= 0) query.after = String(lastSeq);
 				for (let attempt = 0; attempt <= MAX_EXECUTION_RESUME_RETRIES; attempt++) {
 					try {

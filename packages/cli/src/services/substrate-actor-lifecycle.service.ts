@@ -19,6 +19,7 @@ export type SubstrateActorLifecyclePolicy = {
 };
 
 function connectionFingerprint(connection: SubstrateSandboxConfig['connection']): string {
+	// Token and certificate rotation must not change which Actor activity this connection owns.
 	return createHash('sha256')
 		.update(
 			JSON.stringify({
@@ -92,6 +93,7 @@ export class SubstrateActorLifecycleService {
 				actorId,
 				async () => await this.activityRepository.finishOperation(actorId, operationId, 0),
 			);
+			// A slow control RPC must not block admission checks or heartbeats in the local update queue.
 			if (deadline) await this.reclaim(actorId, connection);
 			return true;
 		};

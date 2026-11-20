@@ -51,6 +51,7 @@ export class SubstrateActorActivityRepository {
 	}
 
 	private async update(activity: SubstrateActorActivity, changes: Partial<SubstrateActorActivity>) {
+		// The per-Actor queue is process-local. Revision checks also protect updates from other mains.
 		const result = await this.rows.update(
 			{ actorId: activity.actorId, revision: activity.revision },
 			{ ...changes, revision: activity.revision + 1 },
@@ -211,6 +212,7 @@ export class SubstrateActorActivityRepository {
 	async completeClaim(claim: SubstrateActorSuspensionClaim, now = new Date()): Promise<boolean> {
 		for (;;) {
 			const activity = await this.rows.findOneBy({ actorId: claim.actorId });
+			// A timed-out owner must not complete a newer cleanup claim.
 			if (activity?.claimToken !== claim.claimToken) return false;
 			if (claim.action === 'delete') {
 				const result = await this.rows.delete({
