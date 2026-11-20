@@ -181,14 +181,14 @@ describe('Substrate operation coordination on the migrated database', () => {
 				true,
 			),
 		).toBeUndefined();
-		expect(
-			await repository.startOperation(
+		await expect(
+			repository.startOperation(
 				{ ...actor, connectionFingerprint: 'b'.repeat(64) },
 				'other',
 				60_000,
 				at(2_000),
 			),
-		).toBe(false);
+		).rejects.toThrow('different Substrate connection');
 	});
 
 	it('deletes an ephemeral Actor through a single fenced action', async () => {
@@ -237,6 +237,34 @@ describe('Substrate operation coordination on the migrated database', () => {
 			true,
 		);
 		expect(deletion?.action).toBe('delete');
+	});
+
+	it('recovers an abandoned ephemeral workspace after the other main finishes and retries a failed delete', async () => {
+		const actor = { ...input('n8n-ephemeral-restart'), ephemeral: true, autoStopMinutes: 1 };
+		await repository.startOperation(actor, 'first-main', 120_000, now);
+		await repository.startOperation(actor, 'second-main', 120_000, now);
+		await repository.finishOperation(actor.actorId, 'first-main', 0, at(10_000));
+		await repository.heartbeatOperation(actor.actorId, 'second-main', 120_000, at(30_000));
+		const recovered = new SubstrateActorActivityRepository(
+			dataSource,
+			Container.get(TransactionRunner),
+		);
+		const claimAt = async (ms: number) =>
+			await recovered.claimDueActor(
+				actor.actorId,
+				actor.connectionFingerprint,
+				randomUUID(),
+				at(ms),
+				true,
+			);
+		expect(await claimAt(149_999)).toBeUndefined();
+		const first = await claimAt(150_000);
+		if (first?.action !== 'delete') throw new Error('Expected a deletion claim');
+		await recovered.releaseClaim(first);
+		const retry = await claimAt(150_001);
+		if (retry?.action !== 'delete') throw new Error('Expected a new deletion claim');
+		expect(await recovered.completeClaim(retry)).toBe(true);
+		expect(await claimAt(150_002)).toBeUndefined();
 	});
 
 	it('lets new work acquire an expired claim and ignores the old owner afterward', async () => {

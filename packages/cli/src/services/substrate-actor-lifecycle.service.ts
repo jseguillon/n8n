@@ -148,8 +148,8 @@ export class SubstrateActorLifecycleService {
 	}
 
 	async cleanupIdleActors(signal?: AbortSignal, now = Date.now()): Promise<void> {
-		if (this.sandboxSettingsService.getProvider() !== 'substrate') return;
-		const config = await this.sandboxSettingsService.getSubstrateConfig();
+		const config = await this.sandboxSettingsService.getSubstrateConfigForCleanup();
+		if (!config) return;
 		const connections = [
 			config.connection,
 			...(config.connection.previousTemplates ?? []).map((template) => ({

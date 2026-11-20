@@ -6,6 +6,7 @@ import type { ErrorReporter } from 'n8n-core';
 import { mock } from 'vitest-mock-extended';
 
 import type { AiService } from '@/services/ai.service';
+import type { SubstrateActorLifecycleService } from '@/services/substrate-actor-lifecycle.service';
 
 import type { InstanceAiSettingsService } from '../../instance-ai-settings.service';
 import { InstanceAiSandboxService } from '../../sandbox';
@@ -41,6 +42,7 @@ describe('AssistantSandboxWorkspaceSource', () => {
 			mock<ErrorReporter>(),
 			mock<AiService>(),
 			settingsService,
+			mock<SubstrateActorLifecycleService>(),
 		);
 		const sandboxService = vi.mocked(InstanceAiSandboxService).mock.results.at(-1)?.value as Record<
 			string,

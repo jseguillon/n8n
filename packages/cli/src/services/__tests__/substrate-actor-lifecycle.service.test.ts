@@ -181,8 +181,8 @@ describe('Substrate Actor coordinator', () => {
 	it('keeps recovery cleanup active for an approved previous template', async () => {
 		await service.createOperationRecorder(connection, policy)('n8n-test', 'old', 'started', 60_000);
 		const oldFingerprint = repository.startOperation.mock.calls[0][0].connectionFingerprint;
-		settings.getProvider.mockReturnValue('substrate');
-		settings.getSubstrateConfig.mockResolvedValue({
+		settings.getProvider.mockReturnValue('n8n-sandbox');
+		settings.getSubstrateConfigForCleanup.mockResolvedValue({
 			enabled: true,
 			provider: 'substrate',
 			connection: {
