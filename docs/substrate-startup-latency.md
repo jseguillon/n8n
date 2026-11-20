@@ -262,3 +262,20 @@ Ten `GetActor` calls with a new connection had a median of 5 ms. Ten calls with
 a reused connection had a median of 1 ms, including its first connection.
 Production connection handling remains unchanged. This small observed gain
 does not justify a new connection cache and its rotation and cleanup rules.
+
+### Marker optimization deployment on 2026-11-20
+
+Source commit `db44b32d3b` was published from `43b7f291d8` on
+`feat/substrate-ghcr-publish-marker` by
+[build 44699158752](https://github.com/jseguillon/n8n/actions/runs/44699158752).
+The Talos deployment `n8n-app/n8n` now runs:
+
+```text
+ghcr.io/jseguillon/n8n@sha256:79143f5ef21ca5a5f86fa80d555a075f2548656fe5b30124903fa36f1c22b43c
+```
+
+All 16 packaged-runtime live records passed. Six targeted marker checks passed:
+missing, present, empty, permission-error fallback, server-error fallback, and
+deleted-Actor recovery. Missing markers executed no fallback command.
+Authenticated n8n sandbox verification returned `ok: true`. UI and readiness
+checks returned HTTP 200. Cleanup removed the disposable validation resources.
