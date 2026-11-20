@@ -224,3 +224,41 @@ Run the [packaged-runtime live suite](../packages/cli/test/live/README.md) in a
 dedicated test Atespace with `SUBSTRATE_ACTOR_TAG` set to its prepared tag.
 The additional check verifies Actor source-tag provenance, workspace setup,
 and the absence of npm installation. The suite uses its own database and Actors.
+
+## Initialization marker checks on 2026-11-19
+
+The marker reader now treats a Substrate filesystem HTTP 404 as a missing file.
+It does not execute the redundant `cat` fallback in that case. Substrate still
+checks for a deleted Actor and recovers it within the file operation. Other read
+errors and other providers retain the command fallback. Existing markers use
+the same file read as before.
+
+The baseline was the deployed n8n image
+`sha256:ead81d624e11c8112a3e53e59ee57b72ce68bab6b195c3121bdbf2737d2390cc`.
+The candidate used the compiled setup module in a separate Node.js process in
+that Pod. The application process kept its deployed code. Each trial used a
+disposable Actor from a clone of the MEMORY bootstrap template. The benchmark
+requested asynchronous suspension immediately after each operation. It did not
+use database operation bookkeeping or an LLM.
+
+Each table cell is the median of ten serial checks. The second block reversed
+the baseline and candidate order. The marker was removed or written before
+each pair of blocks.
+
+| Marker state | Baseline, block 1 | Candidate, block 1 | Baseline, block 2 | Candidate, block 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Missing | 971 ms | 614.5 ms | 1,066 ms | 608.5 ms |
+| Present | 495.5 ms | 444 ms | 650.5 ms | 482.5 ms |
+
+The missing-marker median fell by 37–43%. Treat the present-marker difference
+as run variation: both versions use the same successful read. This is a marker
+microbenchmark, not a measurement of full workspace setup or generation time.
+The compiled candidate also passed checks after Actor deletion and with an
+empty marker file. The setup suite passed 42 tests. The Substrate sandbox suite
+passed 28 tests.
+
+A separate transport trial read the mounted CA and token before each RPC.
+Ten `GetActor` calls with a new connection had a median of 5 ms. Ten calls with
+a reused connection had a median of 1 ms, including its first connection.
+Production connection handling remains unchanged. This small observed gain
+does not justify a new connection cache and its rotation and cleanup rules.
