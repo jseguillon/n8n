@@ -48,7 +48,7 @@ function createFilesystem() {
 function createSubstrateFilesystem() {
 	const sandbox = new SubstrateSandbox({
 		endpoint: 'localhost:18443',
-		routerUrl: 'http://localhost:18000',
+		routerUrl: 'https://localhost:18000',
 		atespace: 'test-space',
 		template: 'test-template',
 		tokenFile: '/run/substrate/token',

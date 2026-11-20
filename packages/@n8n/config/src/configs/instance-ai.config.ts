@@ -184,7 +184,7 @@ export class InstanceAiConfig {
 	@Env('SUBSTRATE_API_ENDPOINT')
 	substrateEndpoint: string = '';
 
-	/** Private HTTP or HTTPS URL of the Substrate router. Leave unset to use a saved sandbox connection. */
+	/** Private HTTPS URL of the Substrate router. Leave unset to use a saved sandbox connection. */
 	@Env('SUBSTRATE_ROUTER_URL')
 	substrateRouterUrl: string = '';
 

@@ -138,6 +138,7 @@ describe('SandboxSettingsService', () => {
 
 		it('keeps renewable token and private TLS settings on the server', async () => {
 			Object.assign(globalConfig.instanceAi, {
+				substrateEndpoint: data.endpoint,
 				substrateTokenFile: '/server/token',
 				substrateCaFile: '/server/ca',
 				substrateRouterCredentialFile: '/server/router-credential-bundle.pem',
@@ -161,6 +162,17 @@ describe('SandboxSettingsService', () => {
 				service.getSubstrateConfig({ type: 'substrateApi', data: { ...data, apiToken: '' } }),
 			).rejects.toThrow('access token or server token file');
 		});
+
+		it.each(['', 'different.example.test:443'])(
+			'refuses an unpinned destination for a mounted token',
+			async (endpoint) => {
+				globalConfig.instanceAi.substrateTokenFile = '/server/token';
+				globalConfig.instanceAi.substrateEndpoint = endpoint;
+				await expect(service.getSubstrateConfig({ type: 'substrateApi', data })).rejects.toThrow(
+					'SUBSTRATE_API_ENDPOINT',
+				);
+			},
+		);
 
 		it('adds the server default egress policy to a saved connection', async () => {
 			globalConfig.instanceAi.substrateEgressPolicyFile = '/server/egress-policy.json';
@@ -190,6 +202,7 @@ describe('SandboxSettingsService', () => {
 		it.each([
 			{ endpoint: 'https://api.example.test' },
 			{ endpoint: 'api.example.test:70000' },
+			{ routerUrl: 'http://router.example.test' },
 			{ routerUrl: 'https://user:password@router.example.test' },
 			{ atespace: '../other-space' },
 			{ tokenFile: '/unexpected/file' },

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SandboxServiceError } from '@n8n/sandbox-client';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -9,13 +9,22 @@ import { SubstrateSandbox } from '../workspace/sandbox/substrate-sandbox';
 
 const connection = {
 	endpoint: 'localhost:18443',
-	routerUrl: 'http://localhost:18000',
+	routerUrl: 'https://localhost:18000',
 	atespace: 'test-space',
 	template: 'test-template',
 	tokenFile: '/run/substrate/token',
-	caFile: '/run/substrate/ca.crt',
+	caFile: '',
+	routerCredentialFile: '',
 	serverName: 'api.ate-system.svc',
 };
+
+let fixtureDirectory: string;
+beforeAll(async () => {
+	fixtureDirectory = await mkdtemp(join(tmpdir(), 'substrate-daemon-test-'));
+	connection.routerCredentialFile = join(fixtureDirectory, 'router.pem');
+	await writeFile(connection.routerCredentialFile, 'fixture');
+});
+afterAll(async () => await rm(fixtureDirectory, { recursive: true, force: true }));
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -499,12 +508,19 @@ describe('Substrate sandbox daemon protocol', () => {
 		}
 	});
 
+	it('rejects a cleartext router before making a request', () => {
+		expect(() => new SubstrateSandbox({ ...connection, routerUrl: 'http://localhost' })).toThrow(
+			'HTTPS',
+		);
+	});
+
 	it('requires a router client certificate for HTTPS', async () => {
 		const fetch = vi.fn();
 		vi.stubGlobal('fetch', fetch);
 		const sandbox = new SubstrateSandbox({
 			...connection,
 			routerUrl: 'https://router.example.test',
+			routerCredentialFile: undefined,
 		});
 
 		await expect(
