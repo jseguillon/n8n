@@ -117,6 +117,9 @@ export function parseSubstrateCredential({ type, data }: SandboxCredential) {
 	}
 	const routerUrl = requireHttpUrl(type, data, 'routerUrl');
 	const router = new URL(routerUrl);
+	if (router.protocol !== 'https:') {
+		throw new UnprocessableRequestError('The Substrate router URL must use HTTPS');
+	}
 	if (router.username || router.password || router.search || router.hash) {
 		throw new UnprocessableRequestError(
 			'The Substrate router URL must not contain credentials, a query, or a fragment',
@@ -220,6 +223,14 @@ export class SandboxSettingsService {
 			));
 		if (!resolved) return undefined;
 		const parsed = parseSubstrateCredential(resolved);
+		if (
+			this.config.substrateTokenFile &&
+			parsed.endpoint !== this.config.substrateEndpoint?.trim()
+		) {
+			throw new UnprocessableRequestError(
+				'A mounted Substrate token requires a connection to the endpoint set in SUBSTRATE_API_ENDPOINT',
+			);
+		}
 		if (!this.config.substrateTokenFile && !parsed.token) {
 			throw new UnprocessableRequestError(
 				'A Substrate access token or server token file is required',

@@ -129,7 +129,7 @@ const substrateFields = [
 	{
 		key: 'routerUrl',
 		label: 'instanceAi.onboarding.substrate.routerUrl',
-		placeholder: 'http://atenet-router.ate-system.svc',
+		placeholder: 'https://atenet-router.ate-system.svc',
 	},
 	{
 		key: 'atespace',

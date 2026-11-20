@@ -39,14 +39,14 @@ Allow that SPIFFE ID in the Substrate router ingress list.
 Use a token whose audience and issuer match the control API configuration.
 Rotate the token before it expires. The client reads it for each control API call.
 The router credential stays deployment-managed, even when you enter a static
-Control API token in the UI.
+Control API token in the UI. The router must use HTTPS.
 Keep the router private. Grant the control identity access only to its Atespace.
 
 Leave `N8N_INSTANCE_AI_SANDBOX_PROVIDER` unset to select **Agent Substrate** in
 **Agents → Add a code sandbox**. The dialog verifies a workspace and saves the
 provider selection. It does not send the server token or CA to the browser.
 
-The provider is behind the `140_substrate_sandbox` rollout flag. Set
+Agents and Assistant use the same instance rollout flag, `140_substrate_sandbox`. Set
 `N8N_SUBSTRATE_SANDBOX_ENABLED=true` to enable it on an instance. This setting
 does not configure a Substrate connection.
 
@@ -59,6 +59,13 @@ A complete environment connection takes precedence over saved credentials.
 Partial TLS or token-file settings alone do not lock the connection form.
 For a UI connection, an unset CA file uses system trust. An unset TLS name uses
 the endpoint host. A mounted token file takes precedence over a static token.
+When you mount a token, set `SUBSTRATE_API_ENDPOINT` on the server. Saved and
+draft connections must use that endpoint, including its port.
+
+Before changing to another connection, retire workspaces through their original
+connection. n8n does not move Actors between connections or delete them through
+an unrelated endpoint. An existing workspace with a different connection reports
+an error instead of waiting for a cleanup claim.
 
 ## Settings API
 
@@ -113,6 +120,11 @@ A cluster-leader task runs once per hour as a recovery check for Actors whose
 command-exit cleanup was missed, for example after an n8n restart. It uses the
 configured auto-stop interval and deletes suspended Actors after their retention
 interval.
+
+For an ephemeral Assistant workspace, each main holds a lease while it caches
+the workspace. Idle eviction releases that lease. n8n deletes the Actor after
+the last lease ends. If a main exits or deletion fails, the hourly cleanup task
+can retry after the leases expire. Turning off the rollout does not disable cleanup.
 
 Instance AI uses `N8N_INSTANCE_AI_SANDBOX_AUTO_STOP_MINUTES` (default 15) and
 `N8N_INSTANCE_AI_SANDBOX_AUTO_DELETE_MINUTES` (default 10080). Agent workspaces

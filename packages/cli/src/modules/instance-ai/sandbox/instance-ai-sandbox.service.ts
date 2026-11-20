@@ -28,6 +28,8 @@ import { v5 as uuidv5 } from 'uuid';
 import type { SubstrateActorLifecyclePolicy } from '@/services/substrate-actor-lifecycle.service';
 import { callAiServiceWithRetry } from '@/utils/ai-service-retry';
 
+import { holdEphemeralWorkspace } from './ephemeral-workspace-lease';
+
 import {
 	normalizeSandboxProvider,
 	requireN8nSandboxServiceUrl,
@@ -49,10 +51,9 @@ export type RuntimeSandboxEntry = {
 	verifiedBundles: VerifiedWorkspaceBundles;
 	setupComplete: boolean;
 	setupPromise: Promise<void> | undefined;
-	ephemeral: boolean;
+	cacheLease?: Awaited<ReturnType<typeof holdEphemeralWorkspace>>;
 	expiresAt: number;
 	cleanupTimer?: ReturnType<typeof setTimeout>;
-	idleStopPromise?: Promise<void>;
 };
 
 type SandboxCacheState = { fingerprint: string; config?: SandboxConfig };
@@ -432,11 +433,11 @@ export class InstanceAiSandboxService {
 	}
 
 	private withSubstrateActivity(config: SubstrateSandboxConfig): SubstrateSandboxConfig {
-		if (!this.options.onSubstrateOperation || config.ephemeral) return config;
+		if (!this.options.onSubstrateOperation) return config;
 		const policy: SubstrateActorLifecyclePolicy = {
-			autoStopMinutes: this.instanceAiConfig.sandboxAutoStopMinutes,
+			autoStopMinutes: config.ephemeral ? 1 : this.instanceAiConfig.sandboxAutoStopMinutes,
 			autoDeleteMinutes: this.instanceAiConfig.sandboxAutoDeleteMinutes,
-			ephemeral: false,
+			ephemeral: config.ephemeral === true,
 		};
 		return {
 			...config,
@@ -478,7 +479,7 @@ export class InstanceAiSandboxService {
 					if (existing.configFingerprint !== cacheState.fingerprint) {
 						this.evictSandboxEntry(threadId, existing, 'config_changed');
 					} else if (this.isSandboxEntryExpired(existing) && !this.isSandboxInUse(threadId)) {
-						await this.evictIdleSandboxEntry(threadId, existing);
+						this.evictSandboxEntry(threadId, existing, 'idle');
 					} else {
 						this.touchSandboxEntry(threadId, existing);
 						outcome = 'cached';
@@ -509,6 +510,9 @@ export class InstanceAiSandboxService {
 					) {
 						this.sandboxes.set(threadId, entry);
 						this.scheduleSandboxExpiry(threadId, entry);
+					} else if (entry) {
+						// A settings change invalidated this creation before it entered the cache.
+						entry.cacheLease?.stopRenewing();
 					}
 					return entry;
 				} finally {
@@ -599,6 +603,20 @@ export class InstanceAiSandboxService {
 		});
 		const workspace = createWorkspace(sandbox);
 		if (!sandbox || !workspace) return undefined;
+		if (config.provider === 'substrate' && config.ephemeral && !config.onOperation) {
+			throw new UnexpectedError('The ephemeral Substrate workspace requires an activity recorder');
+		}
+		const cacheLease =
+			config.provider === 'substrate' && config.ephemeral && config.onOperation
+				? await holdEphemeralWorkspace(
+						sandbox.id,
+						config.onOperation,
+						config.timeout ?? DEFAULT_SANDBOX_TTL_MS,
+						() => {
+							this.logger.warn('Could not renew the ephemeral workspace lease', { threadId });
+						},
+					)
+				: undefined;
 		try {
 			await traceSandboxOperation(
 				'start',
@@ -611,7 +629,12 @@ export class InstanceAiSandboxService {
 				await traceSandboxOperation(
 					'cleanup-failed-start',
 					{ inputs: { threadId, sandboxId: sandbox.id } },
-					async () => await workspace.destroy(),
+					async () => {
+						if (cacheLease) await cacheLease.release();
+						// A rejected admission does not grant ownership of this Actor.
+						else if (config.provider !== 'substrate' || !config.onOperation)
+							await workspace.destroy();
+					},
 				);
 			} catch {
 				// Best-effort cleanup when the sandbox cannot start
@@ -644,14 +667,17 @@ export class InstanceAiSandboxService {
 			verifiedBundles: new Map(),
 			setupComplete: false,
 			setupPromise: undefined,
-			ephemeral: config.ephemeral === true,
+			cacheLease,
 			expiresAt: this.nextSandboxExpiry(),
 		};
 		return entry;
 	}
 
 	private async resolveSandboxCacheState(user: User): Promise<SandboxCacheState> {
-		if (this.options.aiService.isProxyEnabled()) {
+		if (
+			this.options.aiService.isProxyEnabled() &&
+			this.instanceAiConfig.sandboxProvider !== 'substrate'
+		) {
 			return {
 				fingerprint: sandboxConfigFingerprint({
 					mode: 'proxy',
@@ -681,6 +707,14 @@ export class InstanceAiSandboxService {
 		if (this.sandboxes.get(threadId) !== entry) return;
 
 		this.sandboxes.delete(threadId);
+		if (reason === 'idle' && entry.cacheLease) {
+			void entry.cacheLease.release().catch(() => {
+				this.logger.warn('Could not release the ephemeral workspace lease', { threadId });
+			});
+		} else {
+			// Give an in-flight turn time to reattach after a settings change.
+			entry.cacheLease?.stopRenewing();
+		}
 		if (entry.cleanupTimer) {
 			clearTimeout(entry.cleanupTimer);
 			entry.cleanupTimer = undefined;
@@ -714,6 +748,7 @@ export class InstanceAiSandboxService {
 			return;
 		}
 
+		// Explicit teardown deletes the remote. Do not also start an idle-delete claim.
 		this.evictSandboxEntry(threadId, entry, reason);
 		try {
 			await withSandboxLifecycleTrace(
@@ -839,8 +874,7 @@ export class InstanceAiSandboxService {
 		if (this.sandboxTtlMs <= 0) return;
 		if (entry.cleanupTimer) clearTimeout(entry.cleanupTimer);
 
-		// Most providers reclaim remote sandboxes. Substrate has no native idle reaper,
-		// so an ephemeral Actor is stopped here and its adapter deletes it.
+		// Releasing the last cache lease lets the coordinator reclaim the remote Actor.
 		const delay = Math.max(0, entry.expiresAt - Date.now());
 		entry.cleanupTimer = setTimeout(() => {
 			const current = this.sandboxes.get(threadId);
@@ -849,50 +883,14 @@ export class InstanceAiSandboxService {
 				this.touchSandboxEntry(threadId, entry);
 				return;
 			}
-			void this.evictIdleSandboxEntry(threadId, entry, true);
+			this.evictSandboxEntry(threadId, entry, 'idle', true);
 		}, delay);
 		entry.cleanupTimer.unref();
 	}
 
-	private async evictIdleSandboxEntry(
-		threadId: string,
-		entry: RuntimeSandboxEntry,
-		detached = false,
-	): Promise<void> {
-		if (this.sandboxes.get(threadId) !== entry) return;
-		if (entry.idleStopPromise) {
-			await entry.idleStopPromise;
-			return;
-		}
-
-		const stop = entry.sandbox._stop?.bind(entry.sandbox);
-		if (!entry.ephemeral || entry.sandbox.provider !== 'substrate' || !stop) {
-			this.evictSandboxEntry(threadId, entry, 'idle', detached);
-			return;
-		}
-
-		entry.idleStopPromise = withSandboxLifecycleTrace(
-			threadId,
-			'stop',
-			{ reason: 'idle', sandboxId: entry.sandbox.id, provider: entry.sandbox.provider },
-			async () => await stop(),
-			{ resolveConfig: this.lifecycleTraceConfig(threadId, entry.userId), detached },
-		);
-		try {
-			await entry.idleStopPromise;
-		} catch (error) {
-			this.logger.warn('Failed to stop idle ephemeral sandbox', {
-				threadId,
-				error: error instanceof Error ? error.message : String(error),
-			});
-		} finally {
-			entry.idleStopPromise = undefined;
-			this.evictSandboxEntry(threadId, entry, 'idle', detached);
-		}
-	}
-
 	stopSandboxExpiryTimers(): void {
 		for (const entry of this.sandboxes.values()) {
+			entry.cacheLease?.stopRenewing();
 			if (!entry.cleanupTimer) continue;
 			clearTimeout(entry.cleanupTimer);
 			entry.cleanupTimer = undefined;

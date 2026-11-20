@@ -124,8 +124,14 @@ export class SubstrateSandbox extends BaseSandbox {
 				throw new Error('Substrate identities must be DNS labels');
 		}
 		const router = new URL(options.routerUrl);
-		if (!['http:', 'https:'].includes(router.protocol) || router.username || router.password)
-			throw new Error('Invalid Substrate router URL');
+		if (
+			router.protocol !== 'https:' ||
+			router.username ||
+			router.password ||
+			router.search ||
+			router.hash
+		)
+			throw new Error('Use an HTTPS Substrate router URL without credentials, query, or fragment');
 		this.timeout = options.timeout ?? 300_000;
 		this.control = new SubstrateControl(options, this.timeout);
 	}
@@ -195,7 +201,7 @@ export class SubstrateSandbox extends BaseSandbox {
 		url.search = new URLSearchParams(query).toString();
 		const headers = new Headers(init.headers);
 		headers.set('ate-target-actor', `${this.options.atespace}/${this.id}`);
-		const dispatcher = await this.getRouterAgent(url);
+		const dispatcher = await this.getRouterAgent();
 		const requestInit: RequestInit & Pick<UndiciRequestInit, 'dispatcher'> = {
 			...init,
 			redirect: 'error',
@@ -214,8 +220,7 @@ export class SubstrateSandbox extends BaseSandbox {
 		return response;
 	}
 
-	private async getRouterAgent(url: URL): Promise<Agent | undefined> {
-		if (url.protocol !== 'https:') return undefined;
+	private async getRouterAgent(): Promise<Agent> {
 		const routerCredentialFile = this.options.routerCredentialFile;
 		if (!routerCredentialFile) {
 			throw new Error('A Substrate router client certificate file is required for HTTPS');
@@ -223,18 +228,22 @@ export class SubstrateSandbox extends BaseSandbox {
 		if (this.routerAgentPromise) return await this.routerAgentPromise;
 
 		const caFile = this.options.caFile;
-		if (!caFile) throw new Error('A Substrate router CA file is required for HTTPS');
 		this.routerAgentPromise = (async () => {
 			const [ca, credentialBundle] = await Promise.all([
-				readFile(caFile).catch(() => {
-					throw new Error('The server Substrate CA file could not be read');
-				}),
+				caFile
+					? readFile(caFile).catch(() => {
+							throw new Error('The server Substrate CA file could not be read');
+						})
+					: undefined,
 				readFile(routerCredentialFile).catch(() => {
 					throw new Error('The server Substrate router credential file could not be read');
 				}),
 			]);
 			// Reuse connections only while the mounted trust and client identity remain unchanged.
-			const fingerprint = createHash('sha256').update(ca).update(credentialBundle).digest('hex');
+			const fingerprint = createHash('sha256')
+				.update(ca ?? '')
+				.update(credentialBundle)
+				.digest('hex');
 			if (this.routerAgent && this.routerAgentFingerprint === fingerprint) return this.routerAgent;
 
 			const previous = this.routerAgent;

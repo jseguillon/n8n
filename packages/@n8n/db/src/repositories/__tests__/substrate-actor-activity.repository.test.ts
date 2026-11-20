@@ -49,16 +49,15 @@ describe('Substrate Actor operation revisions', () => {
 				autoDeleteMinutes: -1,
 				ephemeral: false,
 			};
-			expect(
-				await repository.startOperation(
-					input,
-					'new-operation',
-					60_000,
-					now,
-					approved ? ['connection'] : [],
-				),
-			).toBe(approved);
+			const admission = repository.startOperation(
+				input,
+				'new-operation',
+				60_000,
+				now,
+				approved ? ['connection'] : [],
+			);
 			if (approved) {
+				await expect(admission).resolves.toBe(true);
 				expect(rows.update).toHaveBeenCalledWith(
 					{ actorId: activity.actorId, revision: 1 },
 					expect.objectContaining({
@@ -70,6 +69,7 @@ describe('Substrate Actor operation revisions', () => {
 					}),
 				);
 			} else {
+				await expect(admission).rejects.toThrow('different Substrate connection');
 				expect(rows.update).not.toHaveBeenCalled();
 			}
 		},

@@ -13,6 +13,7 @@ import type {
 	SystemAgentWorkspaceSource,
 } from '@/modules/agents/system-agents/system-agent.types';
 import { AiService } from '@/services/ai.service';
+import { SubstrateActorLifecycleService } from '@/services/substrate-actor-lifecycle.service';
 
 import { InstanceAiSettingsService } from '../instance-ai-settings.service';
 import { InstanceAiSandboxService } from '../sandbox';
@@ -51,6 +52,7 @@ export class AssistantSandboxWorkspaceSource
 		errorReporter: ErrorReporter,
 		aiService: AiService,
 		private readonly settingsService: InstanceAiSettingsService,
+		substrateLifecycle: SubstrateActorLifecycleService,
 	) {
 		this.sandboxService = new InstanceAiSandboxService({
 			config: globalConfig.instanceAi,
@@ -62,6 +64,9 @@ export class AssistantSandboxWorkspaceSource
 			},
 			backgroundTasks: { getRunningTasks: () => [] },
 			settingsService,
+			onSubstrateOperation: (connection, policy) =>
+				substrateLifecycle.createOperationRecorder(connection, policy),
+			onSubstrateDestroyed: async (actorId) => await substrateLifecycle.forgetActor(actorId),
 			aiService,
 			// A v1 thread can have the same id, so the sandbox identity needs its own base name.
 			identityScheme: 'assistant',

@@ -1260,15 +1260,18 @@ describe('InstanceAiSandboxService', () => {
 	});
 
 	describe('expiry timers', () => {
-		it('stops an idle ephemeral Substrate Actor before evicting its cache entry', async () => {
+		it('holds an ephemeral Actor between tools and releases only its cache lease on idle eviction', async () => {
 			vi.useFakeTimers();
 			try {
+				const record = vi.fn(async () => true);
+				const onSubstrateOperation = vi.fn(() => record);
 				const { service } = createSandboxService({
+					onSubstrateOperation,
 					config: {
 						sandboxEnabled: true,
 						sandboxProvider: 'substrate',
 						sandboxEphemeral: true,
-						builderSandboxTtlMs: 1000,
+						builderSandboxTtlMs: 45_000,
 						substrateEndpoint: 'api.ate-system.svc:443',
 						substrateRouterUrl: 'https://router.example',
 						substrateAtespace: 'n8n',
@@ -1286,9 +1289,33 @@ describe('InstanceAiSandboxService', () => {
 				(setupSandboxWorkspace as Mock).mockResolvedValue(undefined);
 
 				await service.getOrCreateWorkspace('thread-1', fakeUser, {} as InstanceAiContext);
-				await vi.advanceTimersByTimeAsync(1000);
+				await vi.advanceTimersByTimeAsync(30_000);
+				expect(record).toHaveBeenLastCalledWith(
+					sandbox.id,
+					expect.any(String),
+					'heartbeat',
+					expect.any(Number),
+				);
+				await vi.advanceTimersByTimeAsync(15_000);
 
-				expect(sandbox._stop).toHaveBeenCalledTimes(1);
+				expect(onSubstrateOperation).toHaveBeenCalledWith(
+					expect.anything(),
+					expect.objectContaining({ ephemeral: true, autoStopMinutes: 1 }),
+				);
+				expect(record).toHaveBeenCalledWith(
+					sandbox.id,
+					expect.any(String),
+					'started',
+					expect.any(Number),
+					expect.any(AbortSignal),
+				);
+				expect(record).toHaveBeenCalledWith(
+					sandbox.id,
+					expect.any(String),
+					'finished',
+					expect.any(Number),
+				);
+				expect(sandbox._stop).not.toHaveBeenCalled();
 				expect(workspace.destroy).not.toHaveBeenCalled();
 			} finally {
 				vi.useRealTimers();

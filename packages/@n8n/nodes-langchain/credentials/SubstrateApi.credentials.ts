@@ -22,7 +22,7 @@ export class SubstrateApi implements ICredentialType {
 			type: 'string',
 			required: true,
 			default: '',
-			placeholder: 'http://atenet-router.ate-system.svc',
+			placeholder: 'https://atenet-router.ate-system.svc',
 		},
 		{ displayName: 'Atespace', name: 'atespace', type: 'string', required: true, default: '' },
 		{

@@ -1,4 +1,5 @@
 import { Service } from '@n8n/di';
+import { OperationalError } from '@n8n/errors';
 import { DataSource } from '@n8n/typeorm';
 
 import { SubstrateActorActivity } from '../entities/substrate-actor-activity';
@@ -85,11 +86,12 @@ export class SubstrateActorActivityRepository {
 				continue;
 			}
 			if (
-				(activity.connectionFingerprint !== input.connectionFingerprint &&
-					!compatibleFingerprints.includes(activity.connectionFingerprint)) ||
-				claimIsLive(activity, now.getTime())
-			)
-				return false;
+				activity.connectionFingerprint !== input.connectionFingerprint &&
+				!compatibleFingerprints.includes(activity.connectionFingerprint)
+			) {
+				throw new OperationalError('This workspace belongs to a different Substrate connection');
+			}
+			if (claimIsLive(activity, now.getTime())) return false;
 			const leases = liveOperations(activity, now.getTime());
 			leases[operationId] = Math.max(leases[operationId] ?? 0, now.getTime() + leaseMs);
 			if (

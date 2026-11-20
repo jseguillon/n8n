@@ -12,10 +12,12 @@ import {
 	type WorkspaceSandbox,
 } from '@n8n/agents/sandbox';
 import { Logger } from '@n8n/backend-common';
+import { SUBSTRATE_SANDBOX_FLAG } from '@n8n/api-types';
+import { PostHogClient } from '@n8n/backend-services';
 import { AgentsConfig } from '@n8n/config';
 import { Service } from '@n8n/di';
 import { InstanceSettings } from 'n8n-core';
-import { OperationalError } from '@n8n/errors';
+import { NotFoundError, OperationalError } from '@n8n/errors';
 import { sanitizeSandboxErrorDetail } from '@n8n/utils/redaction/sanitize-sandbox-error-detail';
 import { v5 as uuidv5 } from 'uuid';
 
@@ -118,6 +120,7 @@ export class AgentSandboxRuntimeService {
 		private readonly agentRepository: AgentRepository,
 		private readonly sandboxSettingsService: SandboxSettingsService,
 		private readonly substrateActorLifecycle: SubstrateActorLifecycleService,
+		private readonly postHogClient: PostHogClient,
 	) {}
 
 	async warmKnowledgeSandbox(projectId: string, agentId: string): Promise<void> {
@@ -364,6 +367,9 @@ export class AgentSandboxRuntimeService {
 		sandboxId: string,
 		lifecycle: SandboxLifecycle,
 	): Promise<SubstrateSandboxConfig> {
+		if ((await this.postHogClient.getFeatureFlagForInstance(SUBSTRATE_SANDBOX_FLAG)) !== true) {
+			throw new NotFoundError('Not found');
+		}
 		const config = await this.sandboxSettingsService.getSubstrateConfig();
 		return {
 			...config,
