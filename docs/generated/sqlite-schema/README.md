@@ -158,7 +158,7 @@ Auto-generated from the SQLite migrations in @n8n/db. Do not edit by hand.
 | [skill_file](skill_file.md) | 5 |  | table |
 | [skill_source](skill_source.md) | 15 |  | table |
 | [skill_source_link](skill_source_link.md) | 14 |  | table |
-| [skill_version](skill_version.md) | 11 |  | table |
+| [skill_version](skill_version.md) | 12 |  | table |
 | [substrate_actor_activity](substrate_actor_activity.md) | 17 |  | table |
 | [tag_entity](tag_entity.md) | 4 |  | table |
 | [test_case_execution](test_case_execution.md) | 16 |  | table |

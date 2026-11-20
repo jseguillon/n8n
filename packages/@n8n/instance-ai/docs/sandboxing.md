@@ -82,23 +82,19 @@ soon as its final command or file operation finishes, fails, or times out.
 There is no pre-suspend delay. File downloads hold an operation lease until all
 data is read. The suspend RPC returns after the node-local checkpoint and
 worker release. atelet uploads the snapshot to object storage in the background.
-An hourly
-cluster-leader task is the recovery path for command-exit cleanup missed during an
+An hourly cluster-leader task recovers command-exit cleanup missed during an
 n8n restart. It suspends Actors after their configured auto-stop interval and
 deletes suspended Actors after their auto-delete interval. It stores Actor
 activity in the n8n database so it works across main processes. Auto-archive
 applies only to Daytona.
 
-The first Substrate workspace tool prepares workflow dependencies before the
-requested operation. A small command can therefore have a much larger first-use
-wall time than its daemon `executionTimeMs`. The companion ActorTemplate uses
-an idempotent bootstrap and readiness probe to prepare dependencies before its
-golden snapshot. Keep `SUBSTRATE_ACTOR_TAG` unset to use that snapshot. Setup
-checks the complete local dependency tree and skips installation when it matches.
-An optional manual seed tag supports older templates. Use
+The first Substrate workspace tool prepares workflow files and dependencies
+before the requested operation. Setup checks the complete local dependency tree
+and skips installation when it matches. New Actors use the template's golden
+snapshot unless `SUBSTRATE_ACTOR_TAG` selects a prepared dependency snapshot. Use
 `SUBSTRATE_PREVIOUS_ACTOR_TEMPLATES` to retain existing Actors during a template
 upgrade without moving them or changing their files.
-See the [startup guide](../../../../docs/substrate-startup-latency.md).
+See [Substrate workspace preparation](../../agents/docs/substrate-sandbox.md#workspace-preparation).
 
 ## Thread-Scoped Lifecycle
 

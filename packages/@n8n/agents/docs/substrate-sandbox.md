@@ -9,9 +9,11 @@ Each sandbox uses an Actor in the configured Atespace and ActorTemplate.
 Use **Settings > Agents > Shared sandbox** to enter the control endpoint,
 router URL, Atespace, ActorTemplate, and optional static access token. The UI
 verifies and saves a `substrateApi` instance credential. Server-owned TLS trust,
-router credentials, and renewable token files stay outside the form. See the
-[UI configuration guide](../../../../docs/substrate-ui-configuration.md) for
-the full field boundary and precedence rules.
+router credentials, and renewable token files stay outside the form.
+
+The connection serves Agents and n8n Assistant. Editing a saved connection uses
+the existing credential encryption, redaction, and permission checks. Selecting
+an existing credential does not return its secret to the form.
 
 For a fully environment-managed connection, use the variables below.
 
@@ -44,16 +46,19 @@ Leave `N8N_INSTANCE_AI_SANDBOX_PROVIDER` unset to select **Agent Substrate** in
 **Agents → Add a code sandbox**. The dialog verifies a workspace and saves the
 provider selection. It does not send the server token or CA to the browser.
 
-The provider is behind the `140_substrate_sandbox` rollout flag. Create the flag
-disabled in Staging and Production before rollout. Set
-`N8N_SUBSTRATE_SANDBOX_ENABLED=true` to force-enable it on a development or test
-instance. The variable defaults to false and does not configure a Substrate
-connection.
+The provider is behind the `140_substrate_sandbox` rollout flag. Set
+`N8N_SUBSTRATE_SANDBOX_ENABLED=true` to enable it on an instance. This setting
+does not configure a Substrate connection.
 
 For server-managed configuration, set
 `N8N_INSTANCE_AI_SANDBOX_PROVIDER=substrate` and
 `N8N_INSTANCE_AI_SANDBOX_ENABLED=true`. The UI then shows a server-managed
 connection instead of the provider choices.
+
+A complete environment connection takes precedence over saved credentials.
+Partial TLS or token-file settings alone do not lock the connection form.
+For a UI connection, an unset CA file uses system trust. An unset TLS name uses
+the endpoint host. A mounted token file takes precedence over a static token.
 
 ## Settings API
 
@@ -109,11 +114,6 @@ command-exit cleanup was missed, for example after an n8n restart. It uses the
 configured auto-stop interval and deletes suspended Actors after their retention
 interval.
 
-The coordinator migration preserves existing activity rows and legacy command
-leases. It adds operation leases, revisions, suspension deadlines, and claim
-ownership. Update all main processes together before using the new coordinator;
-older processes do not participate in its revision checks.
-
 Instance AI uses `N8N_INSTANCE_AI_SANDBOX_AUTO_STOP_MINUTES` (default 15) and
 `N8N_INSTANCE_AI_SANDBOX_AUTO_DELETE_MINUTES` (default 10080). Agent workspaces
 use `N8N_AGENTS_AI_SANDBOX_WORKSPACE_AUTO_STOP_MINUTES` (default 5) and
@@ -127,9 +127,6 @@ suspension. Set an auto-delete value to a negative number to keep suspended
 Actor files. Set it to `0` to delete an Actor when it is suspended. Daytona
 auto-archive does not apply to Substrate.
 
-`N8N_SUBSTRATE_SANDBOX_SUSPEND_DELAY_MS` no longer applies. n8n always requests
-suspension immediately after the final operation.
-
 The ActorTemplate router target must match the daemon listen port and prepare
 `/home/user/workspace`. Commands run under the daemon's configured user.
 
@@ -140,8 +137,7 @@ does not carry over to Actors created from it. n8n has no built-in destination
 allowlist. Configure a server-owned default policy before workspace setup needs
 to download npm packages.
 
-1. Copy the [example policy](../../../../docs/substrate-egress-policy.example.json)
-   to a JSON file readable by the n8n process.
+1. Save the example below as a JSON file readable by the n8n process.
 2. Mount that file read-only, for example at `/run/substrate/egress-policy.json`.
 3. Set `SUBSTRATE_EGRESS_POLICY_FILE=/run/substrate/egress-policy.json`.
 4. Restart n8n after you change the environment variable.
@@ -186,20 +182,19 @@ unmatched DNS and outbound traffic, so package downloads need an existing policy
 or a configured default. Egress policy files and rules are server-managed, not
 editable through an n8n credential or the sandbox connection form.
 
-## Startup latency
+## Workspace preparation
 
 A command's `executionTimeMs` measures daemon execution, in milliseconds.
 The Assistant turn also includes model calls, lazy workspace setup, router wake,
 file transfers, and suspension. The first workspace tool initializes workflow
 dependencies even when the requested command is small.
 
-The companion ActorTemplate installs dependencies through an idempotent
-bootstrap command. It starts the daemon only after validation succeeds. Its
-readiness probe therefore gates the prepared golden snapshot. The image itself
-keeps Node.js and system tools but has no npm workspace installation.
-Leave `SUBSTRATE_ACTOR_TAG` unset to use that golden snapshot.
+Prepare the ActorTemplate with the sandbox daemon, Node.js, and a writable
+`/home/user/workspace`. The daemon must expose a readiness probe. Operators can
+install shared dependencies before the template captures its golden snapshot.
+Leave `SUBSTRATE_ACTOR_TAG` unset to use the template's golden snapshot.
 
-For a legacy template, use `SUBSTRATE_ACTOR_TAG` to seed new Actors from a dependency-only snapshot.
+Use `SUBSTRATE_ACTOR_TAG` to seed new Actors from a dependency-only snapshot.
 The tag must belong to the configured Atespace and ActorTemplate. This setting
 does not change existing Actors or their template checks. An absent or
 incompatible configured tag fails Actor creation. With the setting unset, n8n
@@ -210,29 +205,7 @@ It skips installation only when the complete tree satisfies the generated
 package manifest. Missing or incompatible dependencies use the existing install
 path. Linked-SDK development mode still installs its packages.
 
-See the [preparation and benchmark guide](../../../../docs/substrate-startup-latency.md).
-
 When you select a new immutable template, list approved old names in
 `SUBSTRATE_PREVIOUS_ACTOR_TEMPLATES`. Existing Actors keep their original
 template and state. Both template validation and persisted activity accept only
 the explicit same-Atespace allowlist. Cleanup continues to handle old Actors.
-
-## Integration test
-
-The Substrate integration suite is disabled by default. Set
-`SUBSTRATE_INTEGRATION_TEST=1` and provide the `SUBSTRATE_*` connection
-variables to run it against a private test Atespace:
-
-```sh
-SUBSTRATE_INTEGRATION_TEST=1 pnpm test:substrate:live
-```
-
-The SDK suite creates and deletes Actors. It verifies lifecycle wake and
-persistence, router filesystem operations, command results, timeout, cancellation,
-and cached-adapter recovery. It is separate from the LLM recording setup.
-
-For coordinator behavior, run the [packaged-runtime live suite](../../../cli/test/live/README.md).
-It uses a temporary database, checks the expected published sandbox-image digest,
-and verifies actual ATE states. The guide includes a command that runs the same
-maintained test file inside an n8n pod without installing test dependencies.
-Never run either suite against a shared production Atespace.
