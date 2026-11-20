@@ -502,7 +502,16 @@ async function readWorkspaceFile(
 		try {
 			const content = await filesystem.readFile(path, { encoding: 'utf-8' });
 			return typeof content === 'string' ? content : content.toString('utf-8');
-		} catch {
+		} catch (error) {
+			// Substrate recovers deleted Actors before it reports a missing file.
+			if (
+				workspace.sandbox?.provider === 'substrate' &&
+				error instanceof Error &&
+				'status' in error &&
+				error.status === 404
+			) {
+				return null;
+			}
 			if (!workspace.sandbox) return null;
 		}
 	}

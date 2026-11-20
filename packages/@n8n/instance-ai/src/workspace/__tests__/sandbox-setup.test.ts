@@ -1166,6 +1166,46 @@ describe('isSandboxWorkspaceInitialized', () => {
 
 		await expect(isSandboxWorkspaceInitialized(workspace)).resolves.toBe(false);
 	});
+
+	it('reports a missing Substrate marker without executing a command', async () => {
+		const workspace = createFilesystemWorkspace(vi.fn(), undefined, 'substrate');
+		const readFile = vi
+			.fn()
+			.mockRejectedValue(Object.assign(new Error('Not found'), { status: 404 }));
+		workspace.filesystem = { ...workspace.filesystem!, readFile };
+		const fallback = vi.fn().mockResolvedValue('ready');
+		loadSetupSandboxWorkspaceWithFsMocks(vi.fn(), fallback);
+
+		await expect(isSandboxWorkspaceInitialized(workspace)).resolves.toBe(false);
+		expect(fallback).not.toHaveBeenCalled();
+	});
+
+	it.each([403, 500, undefined])(
+		'keeps command fallback for a Substrate read failure with status %s',
+		async (status) => {
+			const workspace = createFilesystemWorkspace(vi.fn(), undefined, 'substrate');
+			const readFile = vi
+				.fn()
+				.mockRejectedValue(Object.assign(new Error('Read failed'), { status }));
+			workspace.filesystem = { ...workspace.filesystem!, readFile };
+			const fallback = vi.fn().mockResolvedValue('ready');
+			loadSetupSandboxWorkspaceWithFsMocks(vi.fn(), fallback);
+
+			await expect(isSandboxWorkspaceInitialized(workspace)).resolves.toBe(true);
+		},
+	);
+
+	it('keeps command fallback for another provider that returns 404', async () => {
+		const workspace = createFilesystemWorkspace(vi.fn(), undefined, 'n8n-sandbox');
+		const readFile = vi
+			.fn()
+			.mockRejectedValue(Object.assign(new Error('Not found'), { status: 404 }));
+		workspace.filesystem = { ...workspace.filesystem!, readFile };
+		const fallback = vi.fn().mockResolvedValue('ready');
+		loadSetupSandboxWorkspaceWithFsMocks(vi.fn(), fallback);
+
+		await expect(isSandboxWorkspaceInitialized(workspace)).resolves.toBe(true);
+	});
 });
 
 describe('formatNodeCatalogLine', () => {
