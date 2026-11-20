@@ -12,7 +12,11 @@ describe('InstanceAiModule', () => {
 	const usePruneInterval = (pruneInterval: number): void => {
 		Container.set(
 			InstanceAiConfig,
-			mock<InstanceAiConfig>({ pruneInterval, workflowSuggestionsEnabled: false }),
+			mock<InstanceAiConfig>({
+				pruneInterval,
+				workflowSuggestionsEnabled: false,
+				substrateRouterCredentialFile: '',
+			}),
 		);
 	};
 
@@ -21,11 +25,7 @@ describe('InstanceAiModule', () => {
 
 		const tasks = await new InstanceAiModule().systemTasks();
 
-		expect(tasks).toEqual([
-			SelfHealingReconciliationTask,
-			SubstrateActorCleanupTask,
-			InstanceAiCheckpointPruningTask,
-		]);
+		expect(tasks).toEqual([SelfHealingReconciliationTask, InstanceAiCheckpointPruningTask]);
 	});
 
 	it.each([true, false])(
@@ -48,6 +48,14 @@ describe('InstanceAiModule', () => {
 
 		const tasks = await new InstanceAiModule().systemTasks();
 
-		expect(tasks).toEqual([SelfHealingReconciliationTask, SubstrateActorCleanupTask]);
+		expect(tasks).toEqual([SelfHealingReconciliationTask]);
+	});
+
+	it('registers Substrate recovery when the operator provides the router identity', async () => {
+		usePruneInterval(0);
+		Container.get(InstanceAiConfig).substrateRouterCredentialFile = '/run/test/router';
+		await expect(new InstanceAiModule().systemTasks()).resolves.toContain(
+			SubstrateActorCleanupTask,
+		);
 	});
 });

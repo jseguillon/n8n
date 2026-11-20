@@ -88,6 +88,31 @@ describe('SandboxSettingsService', () => {
 		});
 		afterEach(() => vi.unstubAllEnvs());
 
+		it('skips credential lookup during native-only teardown', async () => {
+			globalConfig.instanceAi.substrateRouterCredentialFile = '';
+			await expect(service.getSubstrateConfigForCleanup()).resolves.toBeUndefined();
+			expect(instanceCredentialBroker.resolveForUse).not.toHaveBeenCalled();
+		});
+
+		it('skips teardown when only the router identity is configured', async () => {
+			instanceCredentialBroker.resolveForUse.mockResolvedValue(null);
+			await expect(service.getSubstrateConfigForCleanup()).resolves.toBeUndefined();
+		});
+
+		it('resolves a retained Substrate credential for teardown with a different active provider', async () => {
+			globalConfig.instanceAi.sandboxProvider = 'n8n-sandbox';
+			instanceCredentialBroker.resolveForUse.mockResolvedValue({
+				id: 'old',
+				name: 'Old sandbox',
+				type: 'substrateApi',
+				data,
+			});
+			await expect(service.getSubstrateConfigForCleanup()).resolves.toMatchObject({
+				provider: 'substrate',
+				connection: { endpoint: data.endpoint },
+			});
+		});
+
 		it('resolves the assigned encrypted connection with system TLS trust', async () => {
 			instanceCredentialBroker.resolveForUse.mockResolvedValue({
 				id: 'substrate-credential',

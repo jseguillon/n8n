@@ -166,16 +166,20 @@ export class InstanceAiModule implements ModuleInterface {
 
 	async systemTasks() {
 		if (!this.isMain()) return [];
-		const { SubstrateActorCleanupTask } = await import(
-			'@/services/substrate-actor-cleanup.task.js'
-		);
 
 		const { GlobalConfig, InstanceAiConfig } = await import('@n8n/config');
 		const { SelfHealingReconciliationTask } = await import(
 			'./self-healing/self-healing-reconciliation.task.js'
 		);
 		const config = Container.get(InstanceAiConfig);
-		const tasks: SystemTaskClass[] = [SelfHealingReconciliationTask, SubstrateActorCleanupTask];
+		const tasks: SystemTaskClass[] = [SelfHealingReconciliationTask];
+		// The server identity must already be mounted for an admin to enable Substrate at runtime.
+		if (config.substrateRouterCredentialFile) {
+			const { SubstrateActorCleanupTask } = await import(
+				'@/services/substrate-actor-cleanup.task.js'
+			);
+			tasks.push(SubstrateActorCleanupTask);
+		}
 
 		// Like `telemetry-pulse`: make sure no job is scheduled when telemetry is off.
 		if (config.workflowSuggestionsEnabled && Container.get(GlobalConfig).diagnostics.enabled) {

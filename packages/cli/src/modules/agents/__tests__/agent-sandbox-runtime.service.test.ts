@@ -73,19 +73,20 @@ function makeSandboxSettingsService(
 		serviceUrl: 'https://sandbox.example',
 		apiKey: 'sandbox-key',
 	});
-	service.getSubstrateConfig.mockResolvedValue({
-		enabled: true,
-		provider: 'substrate',
-		connection: {
-			endpoint: 'api.ate-system.svc:443',
-			routerUrl: 'https://router.example',
-			atespace: 'n8n',
-			template: 'sandbox',
-			tokenFile: '/run/secrets/token',
-			caFile: '/run/secrets/ca.crt',
-			serverName: 'api.ate-system.svc',
-		},
-	});
+	if (provider === 'substrate')
+		service.getSubstrateConfig.mockResolvedValue({
+			enabled: true,
+			provider: 'substrate',
+			connection: {
+				endpoint: 'api.ate-system.svc:443',
+				routerUrl: 'https://router.example',
+				atespace: 'n8n',
+				template: 'sandbox',
+				tokenFile: '/run/secrets/token',
+				caFile: '/run/secrets/ca.crt',
+				serverName: 'api.ate-system.svc',
+			},
+		});
 	return service;
 }
 
@@ -409,30 +410,53 @@ describe('AgentSandboxRuntimeService', () => {
 	});
 
 	it('best-effort destroys workspace and knowledge sandboxes by only their exact identities', async () => {
-		const destroyedIds: string[] = [];
+		const destroyed: Array<[SandboxProvider, string]> = [];
 		createSandboxMock.mockImplementation(async (config) => {
 			const target = makeSandbox(config.provider, config.id);
 			// Teardown must delete by identity even though these instances never started.
 			target.deleteRemote.mockImplementation(async () => {
-				destroyedIds.push(config.id);
+				destroyed.push([config.provider, config.id]);
 				if (config.id === `agent-kb-${knowledgeSandboxId}`) {
 					throw new Error('remote unavailable');
 				}
 			});
 			return target;
 		});
-		const service = makeService();
+		const service = makeService({
+			sandboxSettingsService: makeSandboxSettingsService('n8n-sandbox'),
+		});
 
 		await service.destroyWorkspaceSandbox(projectId, agentId, principalHash);
 		await service.destroyKnowledgeSandbox(projectId, agentId);
 
-		expect(destroyedIds).toEqual([
-			`agent-ws-${workspaceSandboxId}`,
-			workspaceSandboxId,
-			workspaceSandboxId,
-			`agent-kb-${knowledgeSandboxId}`,
-			knowledgeSandboxId,
-			knowledgeSandboxId,
+		expect(destroyed).toEqual([
+			['daytona', `agent-ws-${workspaceSandboxId}`],
+			['n8n-sandbox', workspaceSandboxId],
+			['daytona', `agent-kb-${knowledgeSandboxId}`],
+			['n8n-sandbox', knowledgeSandboxId],
+		]);
+	});
+
+	it('also deletes the exact Substrate identity when a connection remains after a provider switch', async () => {
+		const settings = makeSandboxSettingsService('substrate');
+		settings.getSubstrateConfigForCleanup.mockResolvedValue(await settings.getSubstrateConfig());
+		settings.getProvider.mockReturnValue('n8n-sandbox');
+		const deleted: Array<[SandboxProvider, string]> = [];
+		createSandboxMock.mockImplementation(async (config) => {
+			const target = makeSandbox(config.provider, config.id);
+			target.deleteRemote.mockImplementation(async () => {
+				deleted.push([config.provider, config.id]);
+			});
+			return target;
+		});
+		await makeService({ sandboxSettingsService: settings }).destroyKnowledgeSandbox(
+			projectId,
+			agentId,
+		);
+		expect(deleted).toEqual([
+			['daytona', `agent-kb-${knowledgeSandboxId}`],
+			['n8n-sandbox', knowledgeSandboxId],
+			['substrate', knowledgeSandboxId],
 		]);
 	});
 });
