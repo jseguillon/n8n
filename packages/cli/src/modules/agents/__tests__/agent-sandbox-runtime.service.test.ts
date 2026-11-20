@@ -5,6 +5,7 @@ import type {
 	WorkspaceSandbox,
 } from '@n8n/agents/sandbox';
 import type { Logger } from '@n8n/backend-common';
+import type { PostHogClient } from '@n8n/backend-services';
 import type { AgentsConfig } from '@n8n/config';
 import { mock } from 'vitest-mock-extended';
 import type { InstanceSettings } from 'n8n-core';
@@ -96,6 +97,7 @@ function makeService({
 	instanceSettings = mock<InstanceSettings>({ instanceId }),
 	agentRepository = makeAgentRepository(),
 	sandboxSettingsService = makeSandboxSettingsService(),
+	postHogClient = mock<PostHogClient>({ getFeatureFlagForInstance: vi.fn(async () => true) }),
 	substrateActorLifecycle = mock<SubstrateActorLifecycleService>({
 		createOperationRecorder: vi.fn(() => async () => true),
 	}),
@@ -105,6 +107,7 @@ function makeService({
 	instanceSettings?: InstanceSettings;
 	agentRepository?: AgentRepository;
 	sandboxSettingsService?: SandboxSettingsService;
+	postHogClient?: PostHogClient;
 	substrateActorLifecycle?: SubstrateActorLifecycleService;
 } = {}): AgentSandboxRuntimeService {
 	return new AgentSandboxRuntimeService(
@@ -125,6 +128,7 @@ function makeService({
 		agentRepository,
 		sandboxSettingsService,
 		substrateActorLifecycle,
+		postHogClient,
 	);
 }
 
@@ -199,6 +203,20 @@ describe('AgentSandboxRuntimeService', () => {
 		).toBeUndefined();
 		expect(sandbox._start).toHaveBeenCalled();
 		expect(createFilesystemMock).toHaveBeenCalledWith(sandbox, undefined);
+	});
+
+	it('blocks Substrate workspaces and knowledge when the instance rollout is off', async () => {
+		const settings = makeSandboxSettingsService('substrate');
+		const service = makeService({
+			sandboxSettingsService: settings,
+			postHogClient: mock<PostHogClient>({ getFeatureFlagForInstance: vi.fn(async () => false) }),
+		});
+		await expect(
+			service.acquireWorkspaceSandbox(projectId, agentId, principalHash),
+		).rejects.toThrow('Not found');
+		await expect(service.acquireKnowledgeSandbox(projectId, agentId)).rejects.toThrow('Not found');
+		expect(settings.getSubstrateConfig).not.toHaveBeenCalled();
+		expect(createSandboxMock).not.toHaveBeenCalled();
 	});
 
 	it('constructs workspace sandboxes without booting them and passes the filesystem init hook', async () => {
