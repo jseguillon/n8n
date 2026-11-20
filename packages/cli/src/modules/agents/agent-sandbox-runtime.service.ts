@@ -42,7 +42,7 @@ const DEFAULT_SANDBOX_IMAGE = 'daytonaio/sandbox:0.5.0';
 const WORKSPACE_AUTO_ARCHIVE_INTERVAL_MINUTES = 60;
 const KNOWLEDGE_AUTO_ARCHIVE_INTERVAL_MINUTES = 60;
 
-/** `ephemeral` applies to every provider; the intervals are Daytona-only. */
+/** Intervals configure Daytona idle rules and Substrate operation cleanup. */
 type SandboxLifecycle = Pick<
 	DaytonaSandboxConfig,
 	'ephemeral' | 'autoStopInterval' | 'autoArchiveInterval' | 'autoDeleteInterval'
@@ -182,7 +182,7 @@ export class AgentSandboxRuntimeService {
 			buildWorkspaceLabels(projectId, agentId, principalHash),
 			`${provider}:workspace:${sandboxId}`,
 			{
-				// Persistent scratch space: stop after 5m idle, then delete after 24h.
+				// Keep workspace files across stops; use the configured retention for cleanup.
 				ephemeral: false,
 				autoStopInterval: this.agentsConfig.sandboxWorkspaceAutoStopMinutes,
 				autoArchiveInterval: WORKSPACE_AUTO_ARCHIVE_INTERVAL_MINUTES,
