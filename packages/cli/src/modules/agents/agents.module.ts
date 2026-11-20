@@ -256,7 +256,10 @@ export class AgentsModule implements ModuleInterface {
 			AgentChannelMediaRetentionTask,
 		];
 
-		if (!Container.get(ModuleRegistry).isActive('instance-ai')) {
+		if (
+			Container.get(GlobalConfig).instanceAi.substrateRouterCredentialFile &&
+			!Container.get(ModuleRegistry).isActive('instance-ai')
+		) {
 			const { SubstrateActorCleanupTask } = await import(
 				'@/services/substrate-actor-cleanup.task.js'
 			);

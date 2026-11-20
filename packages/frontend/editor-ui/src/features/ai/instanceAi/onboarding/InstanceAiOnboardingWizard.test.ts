@@ -1,6 +1,7 @@
 import { createTestingPinia } from '@pinia/testing';
 import { fireEvent, waitFor } from '@testing-library/vue';
 import { setActivePinia } from 'pinia';
+import { SUBSTRATE_SANDBOX_FLAG } from '@n8n/api-types';
 import { useSettingsStore } from '@n8n/stores/settings.store';
 
 import { createComponentRenderer } from '@/__tests__/render';
@@ -11,12 +12,13 @@ import { useInstanceAiSettingsStore } from '../instanceAiSettings.store';
 import InstanceAiOnboardingWizard from './InstanceAiOnboardingWizard.vue';
 
 const { posthogFeatureFlags } = vi.hoisted(() => ({
-	posthogFeatureFlags: { substrateSandbox: true },
+	posthogFeatureFlags: { substrateSandbox: false },
 }));
 
 vi.mock('@/app/stores/posthog.store', () => ({
 	usePostHog: () => ({
-		isFeatureEnabled: () => posthogFeatureFlags.substrateSandbox,
+		isFeatureEnabled: (key: string) =>
+			key === SUBSTRATE_SANDBOX_FLAG && posthogFeatureFlags.substrateSandbox,
 	}),
 }));
 
@@ -108,7 +110,7 @@ function setupStore(overrides: Record<string, unknown> = {}) {
 describe('InstanceAiOnboardingWizard', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		posthogFeatureFlags.substrateSandbox = true;
+		posthogFeatureFlags.substrateSandbox = false;
 		vi.mocked(hasPermission).mockReturnValue(true);
 	});
 
@@ -408,6 +410,7 @@ describe('InstanceAiOnboardingWizard', () => {
 	it.each([false, true])(
 		'verifies and saves a Substrate connection with server-managed token=%s',
 		async (managed) => {
+			posthogFeatureFlags.substrateSandbox = true;
 			const { pinia, store } = setupStore({
 				envManaged: {
 					model: { provider: false, apiKey: false, baseUrl: false, model: false },
@@ -544,6 +547,7 @@ describe('InstanceAiOnboardingWizard', () => {
 	it.each(sandboxCredentialCases)(
 		'assigns an existing $provider credential through the shared flow without reading its secret',
 		async ({ type, provider, label, field }) => {
+			posthogFeatureFlags.substrateSandbox = provider === 'substrate';
 			const { pinia, store, credentialsStore } = setupStore({
 				n8nSandboxServiceUrl: 'https://sandbox.example.test',
 			});
@@ -605,6 +609,7 @@ describe('InstanceAiOnboardingWizard', () => {
 	);
 
 	it('keeps supported proxy sandbox choices but does not offer a direct Substrate form', async () => {
+		posthogFeatureFlags.substrateSandbox = true;
 		const { pinia } = setupStore();
 		useSettingsStore().$patch({ moduleSettings: { 'instance-ai': { proxyEnabled: true } } });
 		const { findByTestId, queryByTestId } = renderWizard({

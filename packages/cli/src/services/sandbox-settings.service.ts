@@ -182,16 +182,35 @@ export class SandboxSettingsService {
 	async getSubstrateConfig(
 		connection?: InstanceAiConnectionUpdate,
 	): Promise<SubstrateSandboxConfig> {
+		return (await this.resolveSubstrateConfig(connection)) ?? substrateSandboxConfig(this.config);
+	}
+
+	async getSubstrateConfigForCleanup(): Promise<SubstrateSandboxConfig | undefined> {
+		// A vanilla installation has no router identity. Do not look up credentials there.
+		if (!this.config.substrateRouterCredentialFile) return undefined;
+		if (this.getProvider() === 'substrate') return await this.getSubstrateConfig();
+		return (await this.resolveSubstrateConfig()) ?? this.tryEnvironmentSubstrateConfig();
+	}
+
+	private tryEnvironmentSubstrateConfig(): SubstrateSandboxConfig | undefined {
+		try {
+			return substrateSandboxConfig(this.config);
+		} catch {
+			// Partial server config can supply only TLS or a renewable token.
+			return undefined;
+		}
+	}
+
+	private async resolveSubstrateConfig(
+		connection?: InstanceAiConnectionUpdate,
+	): Promise<SubstrateSandboxConfig | undefined> {
 		if (connection && connection.type !== 'substrateApi')
 			throw new UnprocessableRequestError(
 				'The Substrate connection must use a substrateApi credential',
 			);
 		if (!connection && this.environmentSandboxProvider === 'substrate') {
-			try {
-				return substrateSandboxConfig(this.config);
-			} catch {
-				/* Partial server config can supply only TLS or a renewable token. */
-			}
+			const envConfig = this.tryEnvironmentSubstrateConfig();
+			if (envConfig) return envConfig;
 		}
 		const resolved =
 			connection ??
@@ -199,7 +218,7 @@ export class SandboxSettingsService {
 				INSTANCE_AI_SUBSTRATE_CREDENTIAL_POLICY,
 				'Substrate sandbox',
 			));
-		if (!resolved) return substrateSandboxConfig(this.config);
+		if (!resolved) return undefined;
 		const parsed = parseSubstrateCredential(resolved);
 		if (!this.config.substrateTokenFile && !parsed.token) {
 			throw new UnprocessableRequestError(

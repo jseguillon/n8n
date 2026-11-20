@@ -305,17 +305,21 @@ export class AgentSandboxRuntimeService {
 		labels: Record<string, string>,
 	): Promise<void> {
 		try {
-			const config =
+			const substrate =
 				provider === 'substrate'
-					? {
-							...(await this.sandboxSettingsService.getSubstrateConfig()),
-							id: sandboxId,
-							onDestroyed: async (actorId: string) =>
-								await this.substrateActorLifecycle.forgetActor(actorId),
-						}
-					: provider === 'daytona'
-						? await this.resolveDaytonaSandboxConfig(projectId, sandboxId, labels)
-						: await this.resolveN8nSandboxConfig(sandboxId);
+					? await this.sandboxSettingsService.getSubstrateConfigForCleanup()
+					: undefined;
+			if (provider === 'substrate' && !substrate) return;
+			const config = substrate
+				? {
+						...substrate,
+						id: sandboxId,
+						onDestroyed: async (actorId: string) =>
+							await this.substrateActorLifecycle.forgetActor(actorId),
+					}
+				: provider === 'daytona'
+					? await this.resolveDaytonaSandboxConfig(projectId, sandboxId, labels)
+					: await this.resolveN8nSandboxConfig(sandboxId);
 			const sandbox = await createSandbox(config, { logger: this.logger });
 			// deleteRemote deletes by sandbox identity even though this instance never
 			// started it; destroy() is scoped to remotes the instance acquired.

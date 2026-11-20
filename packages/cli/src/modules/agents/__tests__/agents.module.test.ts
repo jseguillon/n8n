@@ -161,7 +161,6 @@ describe('AgentsModule', () => {
 				AgentCheckpointPruningTask,
 				AgentInterruptedExecutionSweepTask,
 				AgentChannelMediaRetentionTask,
-				SubstrateActorCleanupTask,
 				AgentKnowledgeSnapshotTask,
 			]);
 		});
@@ -173,17 +172,24 @@ describe('AgentsModule', () => {
 				AgentCheckpointPruningTask,
 				AgentInterruptedExecutionSweepTask,
 				AgentChannelMediaRetentionTask,
-				SubstrateActorCleanupTask,
 			]);
 		});
 
-		it('leaves Substrate cleanup to Instance AI when that module is active', async () => {
-			moduleRegistry = mock<ModuleRegistry>({ isActive: () => true });
-			Container.set(ModuleRegistry, moduleRegistry);
-			Container.set(GlobalConfig, mock<GlobalConfig>({ diagnostics: { enabled: false } }));
-
-			await expect(module.systemTasks()).resolves.not.toContain(SubstrateActorCleanupTask);
-		});
+		it.each([true, false])(
+			'registers configured Substrate cleanup once (Instance AI active: %s)',
+			async (active) => {
+				moduleRegistry = mock<ModuleRegistry>({ isActive: () => active });
+				Container.set(ModuleRegistry, moduleRegistry);
+				Container.set(
+					GlobalConfig,
+					mock<GlobalConfig>({
+						instanceAi: { substrateRouterCredentialFile: '/run/test/router' },
+						diagnostics: { enabled: false },
+					}),
+				);
+				expect((await module.systemTasks()).includes(SubstrateActorCleanupTask)).toBe(!active);
+			},
+		);
 	});
 
 	describe('settings()', () => {
